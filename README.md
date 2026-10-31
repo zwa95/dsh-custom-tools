@@ -57,6 +57,24 @@ command: '$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json; Write-Output 
 args: [{ stdin: 'json' }]
 ```
 
+## The settings page
+
+Each tool is one collapsible card. Inside, the form is split by concern: identity, command
+(target field depends on the mode), argument bindings, parameters, execution, and a free-form
+advanced block for `env`/`credentials`/`examples`.
+
+Two things are worth knowing:
+
+- The **argv strip** under the bindings shows what the model's values would become — one chip per
+  argv element, plus a separate chip for stdin. It is computed in the page with the same rules the
+  host uses; a parity test replays 18 definitions through both implementations so the drawing
+  cannot drift from what actually spawns.
+- The card **diagnoses itself** with the validator's rules as you type. Save is disabled while an
+  error stands, and the revision chip tells you whether the document moved underneath you.
+
+The page cannot run anything. A browser has no channel to the host process, so `preview` and
+`test` stay in the session as `/custom-tools` subcommands.
+
 ## Shell binaries on Windows
 
 `mode: bash` and `mode: powershell` start a shell. Both default to the name on
