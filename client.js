@@ -434,7 +434,19 @@ window.__ModuleLoader__.load({
 
     /** Build the page component bound to the live client context. */
     function makeSectionPage(ctx) {
-      const settings = () => ctx.get('remote')?.settings
+      // `remote.settings` is a guarded service name: reading `ctx.remote.settings`
+      // throws unless it is declared in inject, which it now is. `ctx.get()` is
+      // the soft path, so a deployment that lost the service shows an inline
+      // explanation instead of a section that throws mid-render.
+      const settings = () => {
+        const direct = ctx.get('remote.settings')
+        if (direct) return direct
+        try {
+          return ctx.remote?.settings
+        } catch {
+          return undefined
+        }
+      }
 
       return function SectionPage() {
         const [phase, setPhase] = React.useState('loading')
@@ -577,10 +589,11 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      // Only `slots` and `remote` are hard requirements: the page reads and
-      // writes through `ctx.remote.settings`, so an absent settings namespace
-      // degrades to an inline explanation instead of a section that never mounts.
-      inject: ['slots', 'remote'],
+      // `remote.settings` has to be declared: the client context guards service
+      // properties exactly like the host, so reading it without inject throws
+      // "cannot get property \"remote.settings\" without inject" while rendering.
+      // This is also what the shipped settings UI declares on its own provider.
+      inject: ['slots', 'remote', 'remote.settings'],
       apply(ctx) {
         const SectionPage = makeSectionPage(ctx)
         ctx.slots.inject('settings.section', function* () {

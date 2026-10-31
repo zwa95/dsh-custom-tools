@@ -48,13 +48,13 @@ test('the client registers under the package name', () => {
   assert.equal(typeof spec.factory, 'function')
 })
 
-test('the client declares only slots and remote as hard requirements', () => {
+test('the client declares the remote settings service it reads', () => {
   const exportsObject = loadBundle().factory((name) => {
     if (name === 'react') return fakeReact()
     throw new Error(`unexpected require: ${name}`)
   })
   // Arrays built inside the VM carry that realm's prototype, so compare values.
-  assert.deepEqual(Array.from(exportsObject.inject), ['slots', 'remote'])
+  assert.deepEqual(Array.from(exportsObject.inject), ['slots', 'remote', 'remote.settings'])
   assert.equal(typeof exportsObject.apply, 'function')
 })
 
@@ -116,4 +116,13 @@ test('an absent remote settings namespace does not stop the section mounting', (
 
   assert.doesNotThrow(() => exportsObject.apply(ctx))
   assert.equal(registered, 1)
+})
+
+test('the section reads remote settings through the soft get path', () => {
+  // Regression: `ctx.remote.settings` throws "cannot get property
+  // \"remote.settings\" without inject" on the client, because the client
+  // context guards service properties exactly like the host does. `ctx.get()`
+  // is the documented soft path and degrades to an inline explanation.
+  assert.match(source, /ctx\.get\('remote\.settings'\)/u)
+  assert.match(source, /'slots', 'remote', 'remote\.settings'/u)
 })
