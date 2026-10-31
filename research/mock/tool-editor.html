@@ -115,6 +115,7 @@
   .chip.ghost { border-style: dashed; opacity: .5; }
   .chip.ghost i { font-style: normal; }
   .chip.ghost s { margin-left: 6px; font-size: 10px; opacity: .8; }
+  .chip s { margin-left: 6px; font-size: 10px; opacity: .7; text-decoration: none; }
   .c-prog { color: #78a9ff; background: rgba(120,169,255,.12); border-color: rgba(120,169,255,.35); }
   .c-script { color: #56b6c2; background: rgba(86,182,194,.12); border-color: rgba(86,182,194,.35); }
   .c-lit { color: #b9c0d4; background: rgba(185,192,212,.10); border-color: rgba(185,192,212,.28); }
@@ -224,8 +225,8 @@
 
   <div class="prev" id="preview"></div>
   <div class="hint" style="margin-top:8px;color:var(--text-3);font-size:11px">
-    每个块是宿主真正 spawn 的一个 argv 元素（逐元素，不拼 shell）。<b>变量名显示在值前面</b>，绿色块取的是「预览值」，
-    可以在变量详情里改；开关即使关着也画出来，虚线表示它现在不产生元素。
+    每个块是宿主真正 spawn 的一个 argv 元素（逐元素，不拼 shell）。绿色块是变量的位置，只写变量名 ——
+    值要到模型调用时才有；开关即使关着也画出来，虚线表示它现在不产生元素。
   </div>
 </div>
 
@@ -297,7 +298,7 @@ const PRESETS = [
         script: 'C:/Users/mark/.dsh/custom-tools/scripts/pretty-json.py',
         command: '',
         pieces: [
-          variable({ name: 'path', type: 'string', required: true, description: 'JSON 文件路径，绝对路径或相对工作目录', sample: 'package.json' }),
+          variable({ name: 'path', type: 'string', required: true, description: 'JSON 文件路径，绝对路径或相对工作目录'}),
           flag({ name: 'sort_keys', as: '--sort', description: '按键名排序后再输出', value: false }),
         ],
       })
@@ -320,9 +321,9 @@ const PRESETS = [
           literal('--smart-case'),
           flag({ name: 'fixed_strings', as: '--fixed-strings', description: '把 pattern 当字面量而非正则', value: false }),
           flag({ name: 'ignore_case', as: '--ignore-case', description: '忽略大小写', value: false }),
-          variable({ name: 'glob', type: 'string', prefix: '--glob=', omitIfEmpty: true, description: '只搜匹配的文件，如 *.js', sample: '*.js' }),
-          variable({ name: 'pattern', type: 'string', required: true, description: '要搜索的文本或正则', sample: 'runCustomTool' }),
-          variable({ name: 'path', type: 'string', description: '搜索起点', sample: '.', default: '"."' }),
+          variable({ name: 'glob', type: 'string', prefix: '--glob=', omitIfEmpty: true, description: '只搜匹配的文件，如 *.js'}),
+          variable({ name: 'pattern', type: 'string', required: true, description: '要搜索的文本或正则'}),
+          variable({ name: 'path', type: 'string', description: '搜索起点', default: '"."' }),
         ],
       })
     },
@@ -338,8 +339,8 @@ const PRESETS = [
         script: '',
         command: 'grep -rnI --color=never -- "$@"; status=$?; if [ "$status" -le 1 ]; then exit 0; fi; exit "$status"',
         pieces: [
-          variable({ name: 'pattern', type: 'string', required: true, description: '要搜索的文本', sample: 'runCustomTool' }),
-          variable({ name: 'path', type: 'string', description: '搜索起点', sample: '.', default: '"."' }),
+          variable({ name: 'pattern', type: 'string', required: true, description: '要搜索的文本'}),
+          variable({ name: 'path', type: 'string', description: '搜索起点', default: '"."' }),
         ],
       })
     },
@@ -355,9 +356,9 @@ const PRESETS = [
         script: '',
         command: "$ErrorActionPreference = 'Stop'\n$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json\nGet-ChildItem -LiteralPath $payload.path -File -Recurse |\n  Where-Object { $_.LastWriteTime -ge (Get-Date).AddDays(-[int]$payload.days) } |\n  Select-Object -First $payload.limit FullName, LastWriteTime",
         pieces: [
-          variable({ name: 'path', type: 'string', description: '搜索起点', sample: '.', transport: 'stdin' }),
-          variable({ name: 'days', type: 'integer', description: '最近几天', sample: 7, transport: 'stdin' }),
-          variable({ name: 'limit', type: 'integer', description: '最多几条', sample: 20, transport: 'stdin' }),
+          variable({ name: 'path', type: 'string', description: '搜索起点', transport: 'stdin' }),
+          variable({ name: 'days', type: 'integer', description: '最近几天', transport: 'stdin' }),
+          variable({ name: 'limit', type: 'integer', description: '最多几条', transport: 'stdin' }),
         ],
       })
     },
@@ -382,7 +383,6 @@ function variable(patch) {
     required: patch.required ?? false,
     description: patch.description ?? '',
     default: patch.default ?? '',
-    sample: patch.sample ?? '',
     transport: patch.transport ?? 'argv',
     prefix: patch.prefix ?? '',
     suffix: patch.suffix ?? '',
@@ -411,29 +411,9 @@ function stdinPiece() {
 }
 
 // ------------------------------------------------------------------ 预览
-const SAMPLE_BY_TYPE = {
-  string: 'value',
-  number: 1.5,
-  integer: 3,
-  boolean: true,
-  array: ['a', 'b'],
-}
-
-function previewValue(piece) {
-  if (piece.sample !== '' && piece.sample !== undefined) return piece.sample
-  if (piece.default !== '' && piece.default !== undefined) {
-    const parsed = tryJson(piece.default)
-    return parsed.ok ? parsed.value : piece.default
-  }
-  return SAMPLE_BY_TYPE[piece.type] ?? 'value'
-}
-
-function tryJson(text) {
-  try {
-    return { ok: true, value: JSON.parse(text) }
-  } catch {
-    return { ok: false }
-  }
+/** 变量在预览里只占一个「名字槽」：值要到模型调用时才有。 */
+function slotText(piece) {
+  return piece.prefix + '{' + (piece.name || '未命名') + '}' + piece.suffix
 }
 
 function isBlank(value) {
@@ -443,32 +423,17 @@ function isBlank(value) {
   return false
 }
 
-/** 把一个变量片段展开成 0..n 个 argv 元素（镜像宿主 bindings.js）。 */
-function expandVariable(piece, warn) {
-  const value = previewValue(piece)
-  if (piece.omitIfEmpty && isBlank(value)) return []
-
-  if (piece.repeat) {
-    const items = Array.isArray(value) ? value : [value]
-    return items.map((item) => piece.prefix + asText(item, piece) + piece.suffix)
-  }
-  if (piece.join !== '' && piece.join !== undefined) {
-    const items = Array.isArray(value) ? value : [value]
-    return [piece.prefix + items.map((item) => asText(item, piece)).join(piece.join) + piece.suffix]
-  }
-  if (piece.json) {
-    return [piece.prefix + JSON.stringify(value) + piece.suffix]
-  }
-  if (typeof value === 'string' && value.startsWith('-') && !piece.allowLeadingDash) {
-    warn.push(`变量 ${piece.name || '(未命名)'} 的预览值以 - 开头，真正运行会被拒绝（除非勾「允许以 - 开头」）`)
-  }
-  return [piece.prefix + asText(value, piece) + piece.suffix]
-}
-
-function asText(value, piece) {
-  if (Array.isArray(value)) return value.join(piece.join ?? ',')
-  if (typeof value === 'boolean') return value ? 'true' : 'false'
-  return String(value)
+/**
+ * 变量的 argv 形态：一个名字槽，外侧可以带前缀/后缀。
+ * 没有值可填，所以这里只表达「这个元素长什么样、有几个」。
+ */
+function variableChips(piece) {
+  const text = slotText(piece)
+  const notes = []
+  if (piece.repeat) notes.push('×n 逐项')
+  if (piece.json) notes.push('JSON')
+  if (piece.omitIfEmpty) notes.push('空值不传')
+  return [{ kind: 'var', name: piece.name, text, notes }]
 }
 
 function buildPreview() {
@@ -510,20 +475,16 @@ function buildPreview() {
         name: piece.name,
         text: piece.as || (piece.name ? '--' + piece.name : '--flag'),
         active: piece.value === true,
+        absent: piece.value !== true,
       })
       continue
     }
     if (piece.kind === 'variable') {
       if (piece.transport === 'stdin') {
-        stdin.push({ name: piece.name, value: previewValue(piece) })
+        stdin.push({ name: piece.name })
         continue
       }
-      const parts = expandVariable(piece, warn)
-      if (parts.length === 0) {
-        argv.push({ kind: 'var', name: piece.name, text: '', omitted: true })
-      } else {
-        for (const text of parts) argv.push({ kind: 'var', name: piece.name, text })
-      }
+      argv.push(...variableChips(piece))
     }
   }
 
@@ -532,15 +493,19 @@ function buildPreview() {
 
 function chipFor(item) {
   const chipClass = { prog: 'c-prog', script: 'c-script', lit: 'c-lit', var: 'c-var', flag: 'c-flag' }[item.kind] ?? 'c-lit'
-  const name = item.name ? `<b class="nm ${item.kind === 'flag' ? 'nm-flag' : ''}">${escapeHtml(item.name)}</b>` : ''
+  // A variable's chip already reads {name}; only a switch needs the extra label
+  // to say which parameter it belongs to.
+  const name = item.kind === 'flag' && item.name
+    ? `<b class="nm nm-flag">${escapeHtml(item.name)}</b>`
+    : ''
 
-  if (item.omitted) {
-    return `<span class="chip ${chipClass} ghost">${name}<i>空值，不传</i></span>`
-  }
   if (item.kind === 'flag' && item.active === false) {
     return `<span class="chip ${chipClass} ghost">${name}<i>${escapeHtml(item.text)}</i><s>未启用</s></span>`
   }
-  return `<span class="chip ${chipClass}">${name}${escapeHtml(item.text)}</span>`
+  const notes = (item.notes ?? []).length > 0
+    ? `<s>${escapeHtml(item.notes.join(' · '))}</s>`
+    : ''
+  return `<span class="chip ${chipClass}">${name}${escapeHtml(item.text)}${notes}</span>`
 }
 
 function renderPreview() {
@@ -552,13 +517,17 @@ function renderPreview() {
 
   if (stdin.length > 0) {
     const chips = stdin.map((entry) =>
-      `<span class="chip c-stdin"><b class="nm">${escapeHtml(entry.name || '(未命名)')}</b>${escapeHtml(JSON.stringify(entry.value))}</span>`)
+      `<span class="chip c-stdin"><b class="nm">${escapeHtml(entry.name || '(未命名)')}</b><i>JSON</i></span>`)
     lines.push(`<div class="line"><span class="tag">stdin</span>${chips.join('')}</div>`)
   }
 
   host.innerHTML = lines.join('')
+  const real = argv.filter((item) => item.absent !== true).length
+  const off = argv.length - real
   document.getElementById('counts').textContent =
-    `argv ${argv.length} 个元素` + (stdin.length ? ` · stdin ${stdin.length} 个键` : '')
+    `argv ${real} 个元素`
+    + (off > 0 ? ` · ${off} 个开关未启用` : '')
+    + (stdin.length ? ` · stdin ${stdin.length} 个键` : '')
 
   const errors = validate()
   for (const message of warn) errors.push(message)
@@ -679,7 +648,7 @@ function variableBody(piece) {
   const body = el('div', 'body')
 
   // 第一行：类型 / 必填 / 默认值 / 预览值
-  const grid = el('div', 'grid4')
+  const grid = el('div', 'grid3')
   grid.appendChild(field('类型', selectEl(TYPES, piece.type, (next) => {
     piece.type = next
     if (next === 'array') piece.repeat = piece.repeat || false
@@ -690,7 +659,6 @@ function variableBody(piece) {
     piece.default = next
     renderPreview()
   }, 'mono')))
-  grid.appendChild(field('预览值', textEl(piece.sample, '用于预览的示例', (next) => { piece.sample = next; renderPreview() }, 'mono')))
   body.appendChild(grid)
 
   body.appendChild(field('说明', textEl(piece.description, '模型读到的这句：填什么、什么格式', (next) => {
@@ -796,7 +764,6 @@ function convert(piece, nextKind) {
   piece.required = piece.required ?? false
   piece.description = piece.description ?? ''
   piece.default = piece.default ?? ''
-  piece.sample = piece.sample ?? ''
 }
 
 function move(index, delta) {
