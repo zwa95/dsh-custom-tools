@@ -6,7 +6,6 @@
   "mode": "script",
   "interpreter": "node",
   "script": "tools/report.mjs",
-  "scriptTrust": "trusted-path",
   "args": [
     {
       "arg": "topic"

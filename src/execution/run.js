@@ -8,8 +8,7 @@
  * Every service is injected (`ctx`), which keeps the module testable and makes
  * the dependency surface auditable: nothing here reaches for a global.
  */
-import { createHash } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
 
 import { buildInvocation } from '../compiler/bindings.js'
@@ -220,13 +219,6 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
   if (plan.mode === 'script') {
     if (!isFile(plan.script)) {
       return failWith('SCRIPT_UNAVAILABLE', `脚本不存在或不是文件：${plan.script}`)
-    }
-    if (plan.scriptSha256) {
-      const actual = createHash('sha256').update(readFileSync(plan.script)).digest('hex')
-      if (actual !== plan.scriptSha256) {
-        return failWith('SCRIPT_UNAVAILABLE',
-          `脚本哈希不匹配：期望 ${plan.scriptSha256}，实际 ${actual}`)
-      }
     }
   }
 

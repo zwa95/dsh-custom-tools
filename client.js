@@ -332,6 +332,8 @@ window.__ModuleLoader__.load({
 
     const POWERSHELL_FLAGS = ['-NoLogo', '-NoProfile', '-NonInteractive']
     const NAME_PATTERN = /^[a-z][a-z0-9_]{0,40}$/u
+    const isAbsolutePath = (value) =>
+      value.startsWith('/') || /^[A-Za-z]:[\/]/u.test(value) || value.startsWith('\\')
     const PARAM_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u
     const ENV_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u
 
@@ -641,7 +643,6 @@ window.__ModuleLoader__.load({
       if (spec.type === 'boolean') return false
       if (spec.type === 'number' || spec.type === 'integer') return 0
       if (spec.type === 'array') return []
-      if (Array.isArray(spec.enum) && spec.enum.length > 0) return spec.enum[0]
       return '<value>'
     }
 
@@ -689,6 +690,15 @@ window.__ModuleLoader__.load({
         const timeout = asNumber(tool.timeoutMs, 120000)
         if (timeout < 1000 || timeout > 600000) at('timeoutMs', '超时须在 1000 – 600000 毫秒之间')
 
+        // Same rule the host enforces: the session directory, or one absolute
+        // path. A model argument can never move it.
+        if (tool.cwd !== undefined) {
+          if (typeof tool.cwd !== 'string' || tool.cwd === '') at('cwd', '工作目录不能为空')
+          else if (tool.cwd !== '.' && !isAbsolutePath(tool.cwd)) {
+            at('cwd', '工作目录要么是 .（会话目录），要么是一个绝对路径')
+          }
+        }
+
         const mode = asString(tool.mode, 'executable')
         if (!MODES.includes(mode)) at('mode', `未知模式 ${mode}`)
         if (mode === 'executable' && asString(tool.executable).trim() === '') at('executable', '未填可执行文件')
@@ -711,12 +721,6 @@ window.__ModuleLoader__.load({
           if (!PARAM_TYPES.includes(type)) at(`parameters.${paramName}.type`, `未知类型 ${type}`)
           if (type === 'array' && parameter.items !== undefined && !PARAM_ITEMS.includes(parameter.items)) {
             at(`parameters.${paramName}.items`, '数组元素类型须是 string/number/integer/boolean')
-          }
-          if (parameter.enum !== undefined) {
-            if (!Array.isArray(parameter.enum)) at(`parameters.${paramName}.enum`, 'enum 必须是数组')
-            else if (parameter.enum.length > 0 && type !== 'string') {
-              at(`parameters.${paramName}.enum`, '只有 string 类型能声明 enum')
-            }
           }
           if (parameter.default !== undefined && parameter.default !== '') {
             if (typeof parameter.default !== 'string') {
@@ -877,6 +881,22 @@ window.__ModuleLoader__.load({
       }, options.map((option) => h('option', { key: option, value: option }, render ? render(option) : option)))
     }
 
+    // A dimmed white-on-brand pill reads as an empty grey capsule; a disabled
+    // primary button gets a flat surface and secondary text instead, so "保存"
+    // stays legible while it is unavailable.
+    function disabledStyle(kind) {
+      if (kind === 'primary') {
+        return {
+          background: C.bg3,
+          border: `1px solid ${C.borderL1}`,
+          color: C.textSecondary,
+          cursor: 'default',
+          opacity: 1,
+        }
+      }
+      return S.disabled
+    }
+
     function Button({ children, onClick, disabled, kind, title }) {
       const base = kind === 'primary' ? S.buttonPrimary
         : kind === 'small' ? S.buttonSmall
@@ -884,7 +904,7 @@ window.__ModuleLoader__.load({
             : S.button
       return h('button', {
         type: 'button',
-        style: disabled ? { ...base, ...S.disabled } : base,
+        style: disabled ? { ...base, ...disabledStyle(kind) } : base,
         disabled,
         title,
         onClick,
@@ -1110,19 +1130,6 @@ window.__ModuleLoader__.load({
               placeholder: '给模型看的说明',
               onChange: (next) => setParameter(name, { description: next }),
             })),
-          h('td', { style: S.td },
-            type === 'string'
-              ? h(TextInput, {
-                value: Array.isArray(parameter.enum) ? parameter.enum.join(', ') : '',
-                disabled,
-                mono: true,
-                placeholder: '可选：a, b, c',
-                onChange: (next) => {
-                  const values = next.split(',').map((item) => item.trim()).filter(Boolean)
-                  setParameter(name, { enum: values.length > 0 ? values : undefined })
-                },
-              })
-              : h('span', { style: S.hint }, type === 'array' ? '值以数组形式传入' : '')),
           h('td', { style: { ...S.td, textAlign: 'right' } },
             h(Button, { kind: 'danger', disabled, onClick: () => removeParameter(name) }, '×')))
       })
@@ -1140,7 +1147,6 @@ window.__ModuleLoader__.load({
             h('th', { style: S.th }, '类型'),
             h('th', { style: { ...S.th, textAlign: 'center' } }, '必填'),
             h('th', { style: S.th }, '说明'),
-            h('th', { style: S.th }, '枚举 / 备注'),
             h('th', { style: S.th }, ''))),
           h('tbody', null, rows)))
     }
@@ -1334,6 +1340,7 @@ window.__ModuleLoader__.load({
     // ----------------------------------------------------------- tool card
 
     function ToolCard({ tool, index, total, disabled, savedAt, issues, onChange, onRemove, onMove, onDuplicate, samples, onSample }) {
+      const customCwd = typeof tool.cwd === 'string' && tool.cwd !== '' && tool.cwd !== '.'
       const [open, setOpen] = React.useState(index === 0)
       const set = (patch) => {
         const next = { ...tool, ...patch }
@@ -1363,13 +1370,17 @@ window.__ModuleLoader__.load({
           }))
         : mode === 'script'
           ? h('div', { style: S.grid2 },
-            h(Field, { label: '解释器', hint: '如 python / node / pwsh' },
-              h(TextInput, {
-                value: asString(tool.interpreter),
-                disabled,
-                mono: true,
-                onChange: (next) => set({ interpreter: next }),
-              })),
+            h(Field, {
+              label: '解释器',
+              hint: '写绝对路径就用那一份（venv 选 venv 里的）；只写名字则按 PATH 找',
+            },
+            h(TextInput, {
+              value: asString(tool.interpreter),
+              disabled,
+              mono: true,
+              placeholder: 'C:/venvs/myproj/Scripts/python.exe',
+              onChange: (next) => set({ interpreter: next }),
+            })),
             h(Field, { label: '脚本路径' },
               h(TextInput, {
                 value: asString(tool.script),
@@ -1387,25 +1398,6 @@ window.__ModuleLoader__.load({
             rows: 5,
             onChange: (next) => set({ command: next }),
           }))
-
-      const scriptExtras = mode === 'script'
-        ? h('div', { style: S.grid2 },
-          h(Field, { label: '脚本来源', hint: 'trusted-path：路径就是信任；user-managed：不允许可变路径' },
-            h(Select, {
-              value: asString(tool.scriptTrust, 'trusted-path'),
-              options: ['trusted-path', 'user-managed'],
-              disabled,
-              onChange: (next) => set({ scriptTrust: next }),
-            })),
-          h(Field, { label: 'SHA-256（可选）', hint: '脚本内容变了就拒绝运行' },
-            h(TextInput, {
-              value: asString(tool.scriptSha256),
-              disabled,
-              mono: true,
-              placeholder: '64 位小写十六进制',
-              onChange: (next) => set({ scriptSha256: next }),
-            })))
-        : null
 
       const samplesForTool = samples?.[index] ?? {}
 
@@ -1472,8 +1464,7 @@ window.__ModuleLoader__.load({
                 onChange: (next) => set({ mode: next }),
               }),
             },
-            target,
-            scriptExtras),
+            target),
 
             h(BindingsPanel, {
               tool,
@@ -1489,14 +1480,27 @@ window.__ModuleLoader__.load({
 
             h(Panel, { title: '执行' },
               h('div', { style: S.grid3 },
-                h(Field, { label: '工作目录', hint: '相对路径基于会话目录；留空用会话目录' },
-                  h(TextInput, {
-                    value: asString(tool.cwd),
+                h(Field, {
+                  label: '工作目录',
+                  hint: customCwd ? '模型的参数改不了它' : '用会话当前目录，会话换目录它也跟着换',
+                },
+                h('div', { style: { display: 'grid', gap: 4 } },
+                  h(Segmented, {
+                    value: customCwd ? 'custom' : 'session',
+                    options: ['session', 'custom'],
                     disabled,
-                    mono: true,
-                    placeholder: '.',
-                    onChange: (next) => set({ cwd: next }),
-                  })),
+                    render: (option) => (option === 'session' ? '会话目录' : '指定路径'),
+                    onChange: (next) => set({ cwd: next === 'session' ? undefined : (customCwd ? asString(tool.cwd) : 'C:/') }),
+                  }),
+                  customCwd
+                    ? h(TextInput, {
+                      value: asString(tool.cwd),
+                      disabled,
+                      mono: true,
+                      placeholder: 'C:/work/project',
+                      onChange: (next) => set({ cwd: next }),
+                    })
+                    : null)),
                 h(Field, { label: '超时（毫秒）', hint: '1000 – 600000' },
                   h(NumberInput, {
                     value: String(asNumber(tool.timeoutMs, 120000)),
@@ -1840,7 +1844,7 @@ window.__ModuleLoader__.load({
             issues,
             samples,
             onSample: setSample,
-            onChange: setTool,
+            onChange: (next) => setTool(index, next),
             onRemove: removeTool,
             onMove: moveTool,
             onDuplicate: duplicateTool,

@@ -107,6 +107,24 @@ to the command text instead of binding them to `$args` (measured, and the reason
 positional bindings in this mode). `/custom-tools preview <name> {"k":"v"}` prints the absolute path
 that will actually run.
 
+## Choosing the program
+
+`mode: script` takes the interpreter as written. A bare name (`python`, `node`, `pwsh`) is resolved
+on `PATH`; an absolute path pins that exact installation, which is what you want when the machine
+has several — a virtualenv, a pyenv shim, a second Python:
+
+```yaml
+mode: script
+interpreter: C:/Users/me/venvs/report/Scripts/python.exe
+script: C:/Users/me/tools/report.py
+```
+
+There is no trust level and no script hash: the author of the definition is the author of the tool,
+so pointing at a script is all the permission it needs.
+
+`cwd` is either `.` (the session directory — follow the conversation) or one absolute path (pin a
+project). Anything else is refused at save time, and no model argument can move it.
+
 ## Parameters and argv
 
 Parameters are described with a JSON-Schema subset (`string`, `number`, `integer`, `boolean`,
@@ -169,7 +187,7 @@ handing back a partial result.
 ## Development
 
 ```
-node --test        # 64 tests, no profile required
+node --test        # 70 tests, no profile required
 ```
 
 The design notes and the runtime evidence behind every contract in this README live in

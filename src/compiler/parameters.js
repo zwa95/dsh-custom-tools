@@ -18,7 +18,6 @@ function dslFor(spec) {
   switch (spec.type) {
     case 'string': {
       const node = { type: 'string' }
-      if (Array.isArray(spec.enum) && spec.enum.length > 0) node.enum = [...spec.enum]
       if (typeof spec.description === 'string' && spec.description !== '') {
         node.description = spec.description
       }
@@ -103,10 +102,6 @@ function coerceScalar(spec, name, value, errors) {
   // string
   if (typeof value !== 'string') {
     errors.push(`${where} 必须是字符串`)
-    return undefined
-  }
-  if (Array.isArray(spec.enum) && spec.enum.length > 0 && !spec.enum.includes(value)) {
-    errors.push(`${where} 必须是 ${spec.enum.map((v) => JSON.stringify(v)).join(' / ')} 之一`)
     return undefined
   }
   if (typeof spec.minLength === 'number' && value.length < spec.minLength) {

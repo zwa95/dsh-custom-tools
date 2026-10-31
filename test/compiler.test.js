@@ -157,7 +157,7 @@ test('defaults are applied, unknown arguments rejected', () => {
   const tool = compiled(spec({
     parameters: {
       depth: { type: 'integer', default: '2' },
-      mode: { type: 'string', enum: ['a', 'b'], required: true },
+      mode: { type: 'string', required: true },
     },
     args: [{ arg: 'depth', prefix: '--depth=' }, { arg: 'mode' }],
   }))
@@ -167,16 +167,16 @@ test('defaults are applied, unknown arguments rejected', () => {
   const unknown = normalizeArguments(tool.plan.parameters, { mode: 'a', extra: 1 })
   assert.equal(unknown.ok, false)
   assert.match(unknown.errors.join(), /未声明/)
-
-  const enumMiss = normalizeArguments(tool.plan.parameters, { mode: 'z' })
-  assert.equal(enumMiss.ok, false)
 })
 
-test('an empty enum from the settings schema means "no enum", not an error', () => {
-  const { errors } = validateSnapshot({
-    tools: [spec({ name: 'echo', parameters: { value: { type: 'string', required: true, enum: [] } } })],
-  })
-  assert.deepEqual(errors.map((issue) => issue.code), [])
+test('cwd is either the session directory or an absolute path', () => {
+  const codes = (cwd) => validateSnapshot({ tools: [spec({ cwd })] }).errors.map((issue) => issue.code)
+
+  assert.deepEqual(codes('.'), [])
+  assert.deepEqual(codes('C:/work/project'), [])
+  assert.deepEqual(codes('/srv/project'), [])
+  assert.deepEqual(codes('sub/dir'), ['CWD_NOT_ABSOLUTE'])
+  assert.deepEqual(codes(''), ['CWD_SHAPE'])
 })
 
 test('validation catches cross-field mistakes', () => {

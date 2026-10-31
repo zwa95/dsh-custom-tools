@@ -67,8 +67,6 @@ function compileOne(spec, deferLoading) {
           : undefined),
     interpreter: spec.interpreter,
     script: spec.script,
-    scriptTrust: spec.scriptTrust ?? 'trusted-path',
-    scriptSha256: spec.scriptSha256 || undefined,
     command: spec.command,
     flags: (spec.mode ?? 'executable') === 'powershell' ? [...POWER_SHELL_FLAGS] : [],
 

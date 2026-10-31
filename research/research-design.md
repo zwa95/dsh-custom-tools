@@ -182,8 +182,6 @@ const ParameterSpec = Schema.object({
   required: Schema.boolean().default(false),
   default: Schema.string().description('任意 JSON 默认值；以 JSON 字符串保存'),
   description: Schema.string(),
-  enum: Schema.array(Schema.string())
-    .description('v1 仅允许 string 参数使用非空字符串枚举'),
   min: Schema.number(),
   max: Schema.number(),
   minLength: Schema.number(),
@@ -203,13 +201,11 @@ export const Config = Schema.object({
     executable: Schema.string().description('executable 模式的 PATH 名或绝对路径'),
     interpreter: Schema.string().description('script 模式的解释器 PATH 名或绝对路径'),
     script: Schema.string().description('script 模式的脚本绝对路径'),
-    scriptTrust: Schema.union(['trusted-path', 'user-managed']).default('trusted-path'),
-    scriptSha256: Schema.string().description('可选的小写 64 位 SHA-256'),
     command: Schema.string()
       .description('bash/powershell 模式的固定源码；模型值只能经 argv/env/stdin 进入'),
     args: Schema.array(ArgBinding).default([]).description('声明式 argv/stdin 映射，见 §5.3'),
-    cwd: Schema.string().default('.'),
-      .default('workspace-write'),
+    cwd: Schema.string().default('.')
+      .description('会话目录（.）或一个绝对路径；模型不可改'),
     approval: Schema.union(['inherit', 'always']).default('inherit'),
     concurrency: Schema.union(['exclusive', 'parallel']).default('exclusive'),
     timeoutMs: Schema.number().step(1000).min(1000).max(600000).default(120000),
@@ -234,14 +230,14 @@ export const Config = Schema.object({
 })
 ```
 
-`ArgBinding` 在 Schemastery 中刻意保持扁平；`.check()` / 编译器必须保证每项恰好选择 `literal`、`arg`、`flag` 三种源之一，并且 `join`、`repeat`、`json`、`stdin` 互斥或符合 §5.3 的组合规则。`stdin` 只允许由一条映射产生。`scriptTrust:'trusted-path'` 要求绝对路径；`user-managed` 允许用户自行管理脚本位置，但仍受 cwd 与可选哈希校验约束。
+`ArgBinding` 在 Schemastery 中刻意保持扁平；`.check()` / 编译器必须保证每项恰好选择 `literal`、`arg`、`flag` 三种源之一，并且 `join`、`repeat`、`json`、`stdin` 互斥或符合 §5.3 的组合规则。`stdin` 只允许由一条映射产生。脚本位置没有信任等级、也没有哈希固定：写定义的人就是写工具的人，指向一个脚本就是它需要的全部授权。
 
 两处有意的持久化妥协：
 
 - `parameters.*.default`、`examples[].args`、`output.schema` 这类**任意 JSON** 使用 **JSON 字符串**字段承载，由 GUI 编辑器解析、规范化，`.check()` / 编译器再次验证；编译后的领域对象始终是结构化 JSON，不把字符串泄漏到执行层。
 - `tools`、`args`、`credentials`、`examples` 的默认值只给空容器。**空工具数组不是错误状态**，页面显示引导卡（§11.5），不自动生成或写入示例工具。
 
-**固定选项（`enum`）的首版约束**：只允许在 `type: string` 下出现；值必须是非空字符串数组、去重、非空串；编译成 DSH DSL 的 `{type:'string', enum:[...]}`。这样模型侧拿到的是一个封闭集合，几乎不可能填出拼错的选项（`--env prodution`）。数值枚举与"多选"留到 v1.1。
+**固定选项（`enum`）已从 v1 移除**：用户反馈「string 不该展示枚举列，说明列已经够用」，而枚举会让表单多出一列只有少数参数用得上的控件。想限制取值就写进 `description`，让模型自己按说明填；插件不再做取值集合校验。
 
 ### 3.3 单个工具的字段语义
 
@@ -258,7 +254,7 @@ tools:
     mode: executable            # executable | script | bash | powershell
     enabled: true
     executable: git             # ✅ PATH 名或绝对路径；YAML 里避免裸反斜杠
-    # script 模式另用 interpreter + script + scriptTrust + 可选 scriptSha256
+    # script 模式另用 interpreter + script
     approval: inherit           # inherit | always
     concurrency: exclusive      # exclusive | parallel；默认保守串行
     args:                       # 声明式映射，见 §5.3
@@ -289,8 +285,8 @@ tools:
 | 校验 | 在哪 | 失败表现 |
 |---|---|---|
 | 形状 / 类型 / 枚举 / 数值范围 / 跨字段一致性 | Schemastery + `.check()`（Host 持久化前） | `mutate` 返回 `settings/rejected` + 消息，**GUI 当场显示，文件不变** |
-| 纯语义 / 编译：重名、保留字、参数 DSL 合法性、`args[].arg` 引用未声明参数、模式缺必填项、JSON 字段、信任/哈希格式 | Manager 纯编译期（§7.3，不做 I/O） | **保留 last-good**；诊断进内存；`/custom-tools status` 显示 |
-| 运行时前置：cwd、解释器/可执行文件、脚本文件与 SHA-256、Credential、审批 | 每次调用的 preflight | 返回稳定错误码；不破坏当前 Generation，不缓存 Credential |
+| 纯语义 / 编译：重名、保留字、参数 DSL 合法性、`args[].arg` 引用未声明参数、模式缺必填项、JSON 字段、cwd 形态 | Manager 纯编译期（§7.3，不做 I/O） | **保留 last-good**；诊断进内存；`/custom-tools status` 显示 |
+| 运行时前置：cwd、解释器/可执行文件、脚本文件、Credential、审批 | 每次调用的 preflight | 返回稳定错误码；不破坏当前 Generation，不缓存 Credential |
 
 第二级**进不了 GUI**——浏览器侧没有读取 Host 内存的通道（§11.4），这是方案 A 唯一真实的代价，用一条命令补（§11.5）。
 
@@ -304,13 +300,13 @@ Config 住在 patch 里，用户可以「打开配置文件」并自行用版本
 
 ### 4.1 参数
 
-- v1 的 `parameters` 只允许 `type: string|number|integer|boolean|array`；数组必须声明标量 `items`。可选字段为 `required`、`default`、`description`、`enum`、`min/max`、`minLength/maxLength`。不支持嵌套 object/json 参数，复杂值可用 `string` 或标量数组并在被调程序内解释。
-- **固定选项**（`--env staging|prod`）用 `type: string` + `enum: [...]`，编译成 `{type:'string', enum:[...]}`：模型侧是封闭集合，页面渲染成下拉，拼错选项这条路直接消失。v1 只支持字符串枚举。
+- v1 的 `parameters` 只允许 `type: string|number|integer|boolean|array`；数组必须声明标量 `items`。可选字段为 `required`、`default`、`description`、`min/max`、`minLength/maxLength`。不支持嵌套 object/json 参数，复杂值可用 `string` 或标量数组并在被调程序内解释。
+- **固定选项**（`--env staging|prod`）改为写进 `description`：v1 不再有 `enum` 字段（§3.2），取值校验交给被调程序，插件只保证字符串完整送达。
 - 类型决定"错得多早被发现"：argv 里最终都是 UTF-8 字符串，但插件在 spawn 前按声明验证。数字语义且装得进 `2^53` → `number`/`integer`；ID、版本号、可能超 `2^53` 或带前导零 → `string`。`min/max/minLength/maxLength` 由插件本地验证；DSH 模型参数 DSL 不支持的约束不伪装成模型侧约束。
-- `default` **由插件自己填**（DSH DSL 的 default 仅是 annotation）。JSON 字符串解析后必须再次走同一套类型、枚举与范围校验，再进入 argv mapper。
+- `default` **由插件自己填**（DSH DSL 的 default 仅是 annotation）。JSON 字符串解析后必须再次走同一套类型与范围校验，再进入 argv mapper。
 - schema 未声明字段、类型数组、`pattern`、`format`、对象属性、嵌套数组等 → **加载期直接报错**，不假装支持。
 - 由于 `parameters` 隐式根对象是**开放**的，插件另加一层「未声明参数 = `INVALID_ARGUMENT`」校验。
-- **无值开关**用 `type: boolean` + args 里的 `{flag: name, as: '--verbose'}` 表达（§5.3）；**二选一开关**（`--enable-x` / `--disable-x`）用 `enum` + `{arg: mode}` 表达，把 flag 文本本身当枚举值。
+- **无值开关**用 `type: boolean` + args 里的 `{flag: name, as: '--verbose'}` 表达（§5.3）；**二选一开关**（`--enable-x` / `--disable-x`）就用 `type: string` 加 `description` 说明可填值，再由两条 `{arg: mode}` 之类的绑定送出。
 
 ### 4.2 输出契约（按可表达子集重写）
 
@@ -645,7 +641,7 @@ Bash:  [bash,  --noprofile, --norc, --, scriptPath, ...mappedArgs]
 Pwsh:  [pwsh,  -NoLogo, -NoProfile, -NonInteractive, -File, scriptPath, ...mappedArgs]
 Node:  [node,  scriptPath, ...mappedArgs]
 ```
-`scriptPath` 必须 absolute + canonical。**双轨信任标记（已定）**：默认要求脚本位于不可写目录；若不在，必须显式声明 `scriptTrust: user-managed` 并**强制 hash pin**，未标记则拒绝加载。
+`script` 路径建议写成 absolute；相对路径按 `cwd` 解析。**没有信任等级**：脚本内容与位置由定义作者负责，插件只在运行期确认它是存在且是文件（`SCRIPT_UNAVAILABLE`）。
 
 **C. bash inline**（命令文本是管理员代码）
 ```
@@ -681,7 +677,7 @@ Node:  [node,  scriptPath, ...mappedArgs]
 | `{arg: name}` | 标量 → 一个元素；缺失则省略 |
 | `{flag: verbose, as: '--verbose'}` | **无值开关**：参数为 `true` → 产出这一个元素；`false`/缺失 → 什么都不产出 ← 补 |
 | `{flag: format, as: ['-v', '-v']}` | 同一个开关产出多个元素（`as` 可为字符串数组） |
-| `{arg: mode, enum: ['--enable-x','--disable-x']}` | 二选一开关：把 flag 文本当枚举值，用 `{arg}` 直接产出 |
+| `{arg: mode}` + `description` 说明取值 | 二选一开关：把 flag 文本当参数值，用 `{arg}` 直接产出 |
 | `{arg: name, prefix: "--out="}` | **`--opt=value` 拼接**（在前，单元素）← 补 |
 | `{arg: name, suffix: ".json"}` | 后缀拼接 ← 补 |
 | `{arg: tags, join: ","}` / `{arg: f, join: " "}` | 数组 → 单元素拼接 ← 补 |
@@ -702,13 +698,13 @@ Node:  [node,  scriptPath, ...mappedArgs]
 
 ```
 1. 取 exec.signal；校验后的 clampTimeout(tool.timeoutMs) —— 加载期已限制在 [1000, 600000]
-2. 校参（DSH DSL + JSON 默认值填充 + 未声明键检查 + enum/范围校验）
+2. 校参（DSH DSL + JSON 默认值填充 + 未声明键检查 + 类型/范围校验）
 3. cwd 预检：有 agent 时 workingDirectory.ensure(agent, signal)，否则用部署默认目录；
    解析相对 cwd → statSync 确认存在且是目录 → 否则 CWD_UNAVAILABLE
    （必须先于 spawn，坏 cwd 要报 CWD_UNAVAILABLE，而不是让 spawn 抛 SPAWN_FAILED）
 4. approval：按 §6.3 决定是否 request；非 allowed-once 即失败
 5. credentials：逐个 resolve(ref)，失败 → CREDENTIAL_UNAVAILABLE
-6. resolveExecutable（当次）→ absolute；script 模式另做脚本存在性与可选 SHA-256 校验
+6. resolveExecutable（当次）→ absolute；script 模式另做脚本存在性校验
    → EXECUTABLE_NOT_FOUND / SCRIPT_UNAVAILABLE
 7. 构造 exact argv（§5.2）+ env overlay（受信 DSH_* + 静态明文 + 凭据 + 声明绑定）
 8. spawn(argv) 直接交给 ctx.subprocess（**没有任何 confinement 层**，见 §6.4）
@@ -1193,7 +1189,7 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 | 议题 | 决定 |
 |---|---|
 | 参数绑定 | **零插值**。模型值只经 argv / stdin / env，永不进入 shell source；不做模板、不做转义 helper（§5） |
-| script 位置 | **双轨 + 显式标记**：默认要求不可写目录，否则 `scriptTrust: user-managed` + 强制 hash pin，未标记拒绝加载 |
+| script 位置 | **作者负责**：写定义的人就是写工具的人；脚本不存在报 `SCRIPT_UNAVAILABLE`，内容不做哈希固定 |
 | Windows 边界 | **含 Windows Git Bash（MSYS）**，作为独立兼容目标单独验收；`pwsh` 7 优先；`.bat/.cmd` 排除 |
 | Jobs | **不进 v1**，理由见 §9（实现简单 + B1 BLOCKER） |
 | agent 起草草稿 | **做，但不在 v1**（v1.1），闸门固定不可配置（§10） |
@@ -1205,7 +1201,7 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 | **编码默认值** | **按可执行器自动注入，默认开**（python/uv → `PYTHONIOENCODING=utf-8`；java → argv 前缀 `-Dfile.encoding=UTF-8`）。用户显式 `env` 覆盖优先，`encodingDefaults: false` 或置空串可关（§6.8）。理由：编码坑是新用户第一个撞上的墙，默认对才是好默认 |
 | **退出码语义** | **只有 0 = 成功**，非 0 一律 `PROCESS_EXIT`。**不做 `allowedExits` 白名单**——用户不知道怎么填，等于把复杂度转嫁给他们；非零即正常的程序包 wrapper（§4.2.3 / §12 第 17 条） |
 | **模型侧措辞** | **照抄原生 `grep` 的四条规矩**（§4.2.4）：三段式骨架、空成功给一句人话、超限一律 `OUTPUT_LIMIT` 硬失败（v1 无 spill）、错误靠稳定 code 而非文案。**不抢 `systemPrompt.section`**——几十个自定义工具各占一行会把 context 吃光，引导写进 description |
-| **参数 enum** | **做进 v1**：`type: string` + `enum: [...]` → DSL `{type:'string', enum:[...]}`，页面渲染成下拉。理由：封闭集合把「拼错选项」这类错误从运行期挪到不可能发生；数值枚举留 v1.1（§4.1） |
+| **参数 enum** | **v1 移除**：表单的「枚举」列与「说明」列重复，且只有少数参数用得上；取值约束写进 `description`，插件只做类型/范围校验 |
 | **参数类型选择** | **默认 `string`，只在该用 `number` 时用 `number`**（数字语义 + 装得进 `2^53` + 无小数位）。argv 里一切都是字符串，`number` 的价值仅在「模型侧提示 + spawn 前拦截 + 控件形态」，代价是精度与 `1e+21` 这类坑（§4.1） |
 
 ---

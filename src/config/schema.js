@@ -52,8 +52,6 @@ const ParameterSpec = Schema.object({
   default: Schema.string()
     .description('任意 JSON 默认值，以 JSON 文本保存'),
   description: Schema.string(),
-  enum: Schema.array(Schema.string())
-    .description('固定选项；v1 仅允许 string 参数'),
   min: Schema.number(),
   max: Schema.number(),
   minLength: Schema.number().step(1).min(0),
@@ -89,13 +87,9 @@ const ToolSpec = Schema.object({
   executable: Schema.string()
     .description('executable 模式：PATH 名或绝对路径'),
   interpreter: Schema.string()
-    .description('script 模式：解释器 PATH 名或绝对路径'),
+    .description('script 模式：解释器 PATH 名或绝对路径（venv 里就写 venv 内的绝对路径）'),
   script: Schema.string()
     .description('script 模式：脚本绝对路径'),
-  scriptTrust: Schema.union(['trusted-path', 'user-managed'])
-    .default('trusted-path'),
-  scriptSha256: Schema.string()
-    .description('可选的小写 64 位 SHA-256，用于固定脚本内容'),
   command: Schema.string()
     .description('bash / powershell 模式：固定源码；模型值只能经 argv / env / stdin 进入'),
 
@@ -103,7 +97,7 @@ const ToolSpec = Schema.object({
     .default([])
     .description('声明式 argv / stdin 映射'),
   cwd: Schema.string().default('.')
-    .description('相对会话工作目录；模型不可改'),
+    .description('会话工作目录（.）或一个绝对路径；模型不可改'),
   approval: Schema.union(['inherit', 'always'])
     .default('inherit'),
   concurrency: Schema.union(['exclusive', 'parallel'])

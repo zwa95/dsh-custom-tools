@@ -425,6 +425,17 @@ test('the page reports the same problems the host validator would refuse', () =>
   assert.ok(messages.includes('dangling:args[0]'), 'undeclared parameter')
   assert.ok(messages.includes('switch_on_string:args[0]'), 'switch on a non-boolean')
   assert.ok(messages.includes('too_slow:timeoutMs'), 'timeout range')
+  assert.ok(
+    internals.collectIssues([{
+      name: 'relative_cwd',
+      description: 'x',
+      mode: 'executable',
+      executable: 'git',
+      cwd: 'sub/dir',
+      args: [],
+    }]).some((issue) => issue.path === 'cwd'),
+    'a relative cwd is refused',
+  )
 
   // And a clean definition produces no error at all.
   const clean = internals.collectIssues([{
@@ -443,6 +454,21 @@ test('the page tracks unsaved edits without touching the saved snapshot', () => 
   // the revision for nothing.
   assert.match(source, /const dirty = !sameJson\(config, baseline\)/u)
   assert.match(source, /setSaved\(clone\(config\)\)/u)
+})
+
+test('an edit reaches the draft the page saves', () => {
+  // ToolCard calls onChange(next) with a single argument, so binding it to
+  // setTool(index, next) directly made every edit a no-op: index received the
+  // tool object, nothing matched, and the dirty flag never flipped.
+  assert.match(source, /onChange: \(next\) => setTool\(index, next\)/u)
+  assert.doesNotMatch(source, /onChange: setTool,/u)
+})
+
+test('the retired knobs are gone from the form', () => {
+  // Enum lists, script trust and SHA-256 were removed: the author owns the tool,
+  // and a string parameter needs no vocabulary of allowed values.
+  assert.doesNotMatch(source, /scriptTrust|scriptSha256/u)
+  assert.doesNotMatch(source, /parameter\.enum/u)
 })
 
 test('the sandbox selector from the old mock is gone', () => {

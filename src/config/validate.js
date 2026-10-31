@@ -48,6 +48,13 @@ const warn = (tool, path, code, message) => ({
 const isPlainObject = (value) =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
+/**
+ * Absolute on either platform, because a definition written on Windows may be
+ * read on Linux and the rule must not depend on where it is validated.
+ */
+const isAbsolutePath = (value) =>
+  value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value) || value.startsWith('\\\\')
+
 /** Which argv directives a binding carries, for the "exactly one" rule. */
 function bindingShape(binding) {
   const shape = []
@@ -81,20 +88,6 @@ function validateParameter(toolName, paramName, spec, path, issues) {
   } else if (spec.items !== undefined) {
     issues.push(warn(toolName, `${path}.items`, 'PARAMETER_ITEMS_IGNORED',
       `参数 ${paramName} 不是数组，items 会被忽略`))
-  }
-
-  // An empty `enum` is how the settings schema serialises "no enum at all", so
-  // it must mean "no constraint" — rejecting it turned every UI-authored tool
-  // into a compile error.
-  const enumValues = Array.isArray(spec.enum) ? spec.enum : []
-  if (enumValues.length > 0) {
-    if (type !== 'string') {
-      issues.push(fail(toolName, `${path}.enum`, 'PARAMETER_ENUM_TYPE',
-        `enum 仅支持 string 参数（${paramName} 是 ${type}）`))
-    } else if (new Set(enumValues).size !== enumValues.length) {
-      issues.push(fail(toolName, `${path}.enum`, 'PARAMETER_ENUM_DUPLICATE',
-        `参数 ${paramName} 的 enum 有重复选项`))
-    }
   }
 
   if (spec.min !== undefined && spec.max !== undefined && spec.min > spec.max) {
@@ -318,12 +311,12 @@ function validateMode(tool, path, issues) {
 
   if (tool.scriptSha256 !== undefined && tool.scriptSha256 !== ''
     && !/^[0-9a-f]{64}$/.test(tool.scriptSha256)) {
-    issues.push(fail(tool.name, `${path}.scriptSha256`, 'SCRIPT_HASH_FORMAT',
-      'scriptSha256 必须是 64 位小写十六进制 SHA-256'))
-  }
-  if (mode !== 'script' && tool.scriptSha256) {
     issues.push(warn(tool.name, `${path}.scriptSha256`, 'SCRIPT_HASH_IGNORED',
-      'scriptSha256 只在 script 模式下生效'))
+      'scriptSha256 已不再使用，可以删掉；脚本内容由你自己负责'))
+  }
+  if (tool.scriptTrust !== undefined) {
+    issues.push(warn(tool.name, `${path}.scriptTrust`, 'SCRIPT_TRUST_IGNORED',
+      'scriptTrust 已不再使用，可以删掉；路径写对就行'))
   }
 }
 
@@ -354,8 +347,19 @@ export function validateTool(tool, path = 'tools[0]') {
       'timeoutMs 必须在 1000..600000 之间'))
   }
 
-  if (isPlainObject(tool.env)) {
-    for (const key of Object.keys(tool.env)) {
+  // Two shapes only: the session directory (`.`) or an absolute path. A
+  // relative path would silently mean "relative to wherever the harness
+  // happened to start", which is exactly the ambiguity this field must not have.
+  const cwd = tool.cwd === undefined ? '.' : tool.cwd
+  if (typeof cwd !== 'string' || cwd.trim() === '') {
+    issues.push(fail(tool.name, `${path}.cwd`, 'CWD_SHAPE',
+      'cwd 只能是 . （会话目录）或一个绝对路径'))
+  } else if (cwd !== '.' && !isAbsolutePath(cwd)) {
+    issues.push(fail(tool.name, `${path}.cwd`, 'CWD_NOT_ABSOLUTE',
+      `cwd 必须写成绝对路径（当前是 ${cwd}）；想用会话目录就写 .`))
+  }
+
+  if (isPlainObject(tool.env)) {    for (const key of Object.keys(tool.env)) {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
         issues.push(fail(tool.name, `${path}.env.${key}`, 'ENV_KEY_FORMAT',
           `环境变量名 ${key} 不合法`))

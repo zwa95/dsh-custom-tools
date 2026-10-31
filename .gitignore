@@ -1,3 +1,7 @@
 node_modules/
 research/legacy-node_modules/
 *.log
+.ui-*.js
+*.probe.log
+harness-tmp.mjs
+probe-tmp.mjs

@@ -15,7 +15,7 @@ const HINTS = {
   INVALID_JSON_OUTPUT: 'output.parse 声明为 json，但 stdout 不是合法 JSON；确认命令在成功时只输出 JSON',
   OUTPUT_SCHEMA_MISMATCH: '输出不符合 output.schema；对照 schema 检查字段名与类型',
   EXECUTABLE_NOT_FOUND: '可执行文件找不到。填 PATH 名（如 git）或绝对路径；相对路径不受支持',
-  SCRIPT_UNAVAILABLE: '脚本不存在、不是文件或哈希不匹配。检查 script 路径与 scriptSha256',
+  SCRIPT_UNAVAILABLE: '脚本不存在或不是文件。检查 script 路径',
   SPAWN_FAILED: '进程启动失败。常见原因：权限不足、可执行文件损坏、cwd 已被删除',
   CWD_UNAVAILABLE: '工作目录不存在或不是目录。改 cwd，或先让会话工作目录可用',
   CREDENTIAL_UNAVAILABLE: '凭据未配置。先在宿主凭据里建好该引用名，再重试',
