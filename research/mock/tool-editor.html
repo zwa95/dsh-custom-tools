@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自定义工具编辑器 · 交互草案</title>
+<style>
+  :root {
+    --bg-1: #16171a;
+    --bg-2: #1d1f23;
+    --bg-3: #24262b;
+    --border-l1: #2c2f36;
+    --border-l2: #3a3e47;
+    --text-1: #e6e8ec;
+    --text-2: #a4a9b4;
+    --text-3: #6f7580;
+    --brand: #4c8dff;
+    --error: #ff6b6b;
+    --warn: #e0af68;
+    --ok: #7dc27d;
+    --radius: 6px;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg-1); color: var(--text-1); }
+  body {
+    font: 13px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    padding: 18px 20px 60px;
+    max-width: 940px;
+  }
+  h1 { font-size: 15px; margin: 0 0 2px; }
+  .sub { color: var(--text-3); font-size: 12px; margin-bottom: 14px; }
+
+  .panel {
+    border: 1px solid var(--border-l1);
+    border-radius: 8px;
+    background: var(--bg-2);
+    padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .panel > .title {
+    font-size: 12px; font-weight: 600; color: var(--text-2);
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px;
+  }
+  .panel > .title .grow { flex: 1; }
+
+  label.f { display: grid; gap: 4px; }
+  label.f > span.l { font-size: 11px; color: var(--text-2); }
+  label.f > span.h { font-size: 11px; color: var(--text-3); }
+  input, select, textarea, button { font: inherit; }
+  input[type=text], input[type=number], select, textarea {
+    background: var(--bg-3);
+    border: 1px solid var(--border-l2);
+    border-radius: var(--radius);
+    color: var(--text-1);
+    padding: 5px 8px;
+    min-height: 28px;
+    width: 100%;
+    outline: none;
+  }
+  input[type=text]:focus, select:focus, textarea:focus { border-color: var(--brand); }
+  input.mono, textarea.mono { font-family: var(--mono); font-size: 12px; }
+  textarea { resize: vertical; }
+  button {
+    background: var(--bg-3);
+    border: 1px solid var(--border-l2);
+    color: var(--text-1);
+    border-radius: var(--radius);
+    padding: 4px 10px;
+    min-height: 26px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--text-3); }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+  button.ghost { background: transparent; }
+  button.icon { padding: 2px 7px; min-height: 24px; color: var(--text-2); }
+  button.icon:hover { color: var(--text-1); }
+  button.danger { color: var(--error); border-color: transparent; background: transparent; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .stack { display: grid; gap: 10px; }
+
+  .seg { display: inline-flex; border: 1px solid var(--border-l2); border-radius: var(--radius); overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: transparent; color: var(--text-2); min-height: 26px; padding: 2px 12px; }
+  .seg button.on { background: var(--bg-3); color: var(--text-1); font-weight: 600; }
+
+  /* ---------- preview ---------- */
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--text-3); margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: 1px; }
+  .prev {
+    background: #121316;
+    border: 1px solid var(--border-l1);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 2.1;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .prev .line + .line { border-top: 1px dashed var(--border-l1); margin-top: 4px; padding-top: 6px; }
+  .prev .tag { color: var(--text-3); font-size: 11px; margin-right: 8px; user-select: none; }
+  .chip {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 4px;
+    margin-right: 5px;
+    border: 1px solid transparent;
+    white-space: pre;
+  }
+  .chip.empty { color: var(--text-3); border-style: dashed; border-color: var(--border-l2); }
+  .c-prog { color: #78a9ff; background: rgba(120,169,255,.12); border-color: rgba(120,169,255,.35); }
+  .c-script { color: #56b6c2; background: rgba(86,182,194,.12); border-color: rgba(86,182,194,.35); }
+  .c-lit { color: #b9c0d4; background: rgba(185,192,212,.10); border-color: rgba(185,192,212,.28); }
+  .c-var { color: #9ece6a; background: rgba(158,206,106,.12); border-color: rgba(158,206,106,.38); }
+  .c-flag { color: #bb9af7; background: rgba(187,154,247,.12); border-color: rgba(187,154,247,.35); }
+  .c-stdin { color: #e0af68; background: rgba(224,175,104,.12); border-color: rgba(224,175,104,.35); }
+  .c-muted { color: var(--text-3); }
+
+  /* ---------- piece rows ---------- */
+  .pieces { display: grid; gap: 6px; }
+  .piece {
+    border: 1px solid var(--border-l1);
+    border-radius: var(--radius);
+    background: var(--bg-2);
+  }
+  .piece.open { border-color: var(--border-l2); background: var(--bg-3); }
+  .piece > .head { display: flex; gap: 6px; align-items: center; padding: 6px 8px; }
+  .piece > .head .kind { width: 92px; flex: none; }
+  .piece > .head .main { flex: 1; min-width: 0; }
+  .piece > .head .main input { width: 100%; }
+  .piece > .body { padding: 4px 10px 10px 10px; display: grid; gap: 8px; }
+  .piece .hint { font-size: 11px; color: var(--text-3); }
+  .bad { border-color: var(--error) !important; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .grid4 { display: grid; grid-template-columns: 1.1fr .6fr 1fr 1fr; gap: 8px; }
+
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    border: 1px solid var(--border-l2);
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 11px;
+    color: var(--text-2);
+    cursor: pointer; user-select: none;
+    background: transparent;
+  }
+  .pill:hover { border-color: var(--text-3); color: var(--text-1); }
+  .pill.on { background: rgba(76,141,255,.16); border-color: var(--brand); color: #cfe0ff; }
+  .cb { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-2); cursor: pointer; }
+  .cb input { accent-color: var(--brand); }
+
+  .errors { display: grid; gap: 4px; font-size: 11px; color: var(--error); }
+  .errors .none { color: var(--ok); }
+  .toast { font-size: 11px; color: var(--text-3); }
+  .kbd { font-family: var(--mono); background: var(--bg-3); border: 1px solid var(--border-l1); border-radius: 3px; padding: 0 4px; }
+  .note { font-size: 11px; color: var(--text-3); border-left: 2px solid var(--border-l2); padding-left: 8px; }
+</style>
+</head>
+<body>
+
+<h1>自定义工具 · 命令与参数（交互草案）</h1>
+<div class="sub">
+  从上到下：程序 → 脚本 → 执行预览 → 片段列表。改任何一项，预览立刻变；预览里的每个色块就是一个真实 argv 元素。
+</div>
+
+<!-- ---------------------------------------------------------------- 程序 -->
+<div class="panel">
+  <div class="title"><span>程序</span><span class="grow"></span>
+    <div class="seg" id="presets"></div>
+  </div>
+
+  <div class="stack">
+    <label class="f" id="row-executable" hidden>
+      <span class="l">可执行文件</span>
+      <input type="text" class="mono" id="executable" placeholder="rg.exe 或 C:/tools/rg.exe">
+      <span class="h">写绝对路径就钉住这一份；只写名字按 PATH 找。</span>
+    </label>
+
+    <label class="f" id="row-interpreter">
+      <span class="l">解释器</span>
+      <input type="text" class="mono" id="interpreter" placeholder="python 或 C:/Users/me/venvs/report/Scripts/python.exe">
+      <span class="h">venv、pyenv、多个 Python 并存时，把这一份的绝对路径写进来。</span>
+    </label>
+
+    <label class="f" id="row-script">
+      <span class="l">脚本路径</span>
+      <input type="text" class="mono" id="script" placeholder="C:/Users/me/tools/report.py">
+      <span class="h">脚本内容由你负责：插件只确认它存在。</span>
+    </label>
+
+    <label class="f" id="row-command" hidden>
+      <span class="l" id="command-label">脚本文本</span>
+      <textarea class="mono" id="command" rows="4" spellcheck="false"></textarea>
+      <span class="h" id="command-hint"></span>
+    </label>
+  </div>
+</div>
+
+<!-- ---------------------------------------------------------------- 预览 -->
+<div class="panel">
+  <div class="title"><span>执行预览</span><span class="grow"></span>
+    <span class="toast" id="counts"></span>
+  </div>
+
+  <div class="legend">
+    <span><i class="c-prog" style="background:#78a9ff"></i>程序</span>
+    <span><i style="background:#56b6c2"></i>脚本</span>
+    <span><i style="background:#b9c0d4"></i>字面值</span>
+    <span><i style="background:#9ece6a"></i>变量</span>
+    <span><i style="background:#bb9af7"></i>开关</span>
+    <span><i style="background:#e0af68"></i>stdin</span>
+  </div>
+
+  <div class="prev" id="preview"></div>
+  <div class="hint" style="margin-top:8px;color:var(--text-3);font-size:11px">
+    这是宿主真正 spawn 的东西（逐元素，不拼 shell）。绿色块取「预览值」，可以在变量的详情里改。
+  </div>
+</div>
+
+<!-- ---------------------------------------------------------------- 片段 -->
+<div class="panel">
+  <div class="title"><span>命令片段</span><span class="grow"></span>
+    <button class="ghost" data-add="literal">＋ 字面值</button>
+    <button class="ghost" data-add="variable">＋ 变量</button>
+    <button class="ghost" data-add="flag">＋ 开关</button>
+    <button class="ghost" data-add="stdin">＋ stdin</button>
+  </div>
+
+  <div class="pieces" id="pieces"></div>
+
+  <div class="note" style="margin-top:10px">
+    这里就是模型能影响的一切：<span class="kbd">字面值</span>固定不变，<span class="kbd">变量</span>由模型填，
+    <span class="kbd">开关</span>是布尔参数，<span class="kbd">stdin</span>把全部参数作为一份 JSON 送进去。
+    变量在同一个列表里声明并绑定，不再有第二张「参数表」。
+  </div>
+</div>
+
+<div class="panel">
+  <div class="title"><span>待办 / 校验</span></div>
+  <div class="errors" id="errors"></div>
+</div>
+
+<script>
+'use strict'
+
+// ------------------------------------------------------------------ 状态
+// 一个工具 = 程序（按模式取不同字段）+ 有序片段列表。
+// 片段自己持有变量的声明，所以「声明」和「绑定」不会再对不上。
+const state = {
+  mode: 'script',
+  executable: '',
+  interpreter: 'python',
+  script: 'C:/Users/mark/.dsh/custom-tools/scripts/pretty-json.py',
+  command: '',
+  pieces: [],
+  open: {},
+  nextId: 1,
+}
+
+const KINDS = {
+  literal: '字面值',
+  variable: '变量',
+  flag: '开关',
+  stdin: 'stdin',
+}
+
+const TYPES = ['string', 'number', 'integer', 'boolean', 'array']
+const ITEMS = ['string', 'number', 'integer', 'boolean']
+
+const MODE_LABEL = {
+  executable: '可执行文件',
+  script: '脚本',
+  bash: 'Bash',
+  powershell: 'PowerShell',
+}
+
+const PRESETS = [
+  {
+    id: 'pretty',
+    label: 'python 脚本',
+    apply() {
+      Object.assign(state, {
+        mode: 'script',
+        interpreter: 'python',
+        script: 'C:/Users/mark/.dsh/custom-tools/scripts/pretty-json.py',
+        command: '',
+        pieces: [
+          variable({ name: 'path', type: 'string', required: true, description: 'JSON 文件路径，绝对路径或相对工作目录', sample: 'package.json' }),
+          flag({ name: 'sort_keys', as: '--sort', description: '按键名排序后再输出', value: false }),
+        ],
+      })
+    },
+  },
+  {
+    id: 'rg',
+    label: 'rg 搜索',
+    apply() {
+      Object.assign(state, {
+        mode: 'executable',
+        executable: 'C:/Users/mark/.dsh/custom-tools/bin/rg.exe',
+        interpreter: '',
+        script: '',
+        command: '',
+        pieces: [
+          literal('--line-number'),
+          literal('--no-heading'),
+          literal('--color=never'),
+          literal('--smart-case'),
+          flag({ name: 'fixed_strings', as: '--fixed-strings', description: '把 pattern 当字面量而非正则', value: false }),
+          flag({ name: 'ignore_case', as: '--ignore-case', description: '忽略大小写', value: false }),
+          variable({ name: 'glob', type: 'string', prefix: '--glob=', omitIfEmpty: true, description: '只搜匹配的文件，如 *.js', sample: '*.js' }),
+          variable({ name: 'pattern', type: 'string', required: true, description: '要搜索的文本或正则', sample: 'runCustomTool' }),
+          variable({ name: 'path', type: 'string', description: '搜索起点', sample: '.', default: '"."' }),
+        ],
+      })
+    },
+  },
+  {
+    id: 'grep',
+    label: 'bash grep',
+    apply() {
+      Object.assign(state, {
+        mode: 'bash',
+        executable: '',
+        interpreter: '',
+        script: '',
+        command: 'grep -rnI --color=never -- "$@"; status=$?; if [ "$status" -le 1 ]; then exit 0; fi; exit "$status"',
+        pieces: [
+          variable({ name: 'pattern', type: 'string', required: true, description: '要搜索的文本', sample: 'runCustomTool' }),
+          variable({ name: 'path', type: 'string', description: '搜索起点', sample: '.', default: '"."' }),
+        ],
+      })
+    },
+  },
+  {
+    id: 'pwsh',
+    label: 'PowerShell（stdin）',
+    apply() {
+      Object.assign(state, {
+        mode: 'powershell',
+        executable: '',
+        interpreter: '',
+        script: '',
+        command: "$ErrorActionPreference = 'Stop'\n$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json\nGet-ChildItem -LiteralPath $payload.path -File -Recurse |\n  Where-Object { $_.LastWriteTime -ge (Get-Date).AddDays(-[int]$payload.days) } |\n  Select-Object -First $payload.limit FullName, LastWriteTime",
+        pieces: [
+          variable({ name: 'path', type: 'string', description: '搜索起点', sample: '.', transport: 'stdin' }),
+          variable({ name: 'days', type: 'integer', description: '最近几天', sample: 7, transport: 'stdin' }),
+          variable({ name: 'limit', type: 'integer', description: '最多几条', sample: 20, transport: 'stdin' }),
+        ],
+      })
+    },
+  },
+]
+
+// ------------------------------------------------------------------ 构造器
+let seq = 1
+const id = () => 'p' + (seq++)
+
+function literal(text) {
+  return { id: id(), kind: 'literal', text: text ?? '' }
+}
+
+function variable(patch) {
+  return {
+    id: id(),
+    kind: 'variable',
+    name: patch.name ?? '',
+    type: patch.type ?? 'string',
+    items: patch.items ?? 'string',
+    required: patch.required ?? false,
+    description: patch.description ?? '',
+    default: patch.default ?? '',
+    sample: patch.sample ?? '',
+    transport: patch.transport ?? 'argv',
+    prefix: patch.prefix ?? '',
+    suffix: patch.suffix ?? '',
+    join: patch.join ?? '',
+    repeat: patch.repeat ?? false,
+    json: patch.json ?? false,
+    omitIfEmpty: patch.omitIfEmpty ?? false,
+    allowLeadingDash: patch.allowLeadingDash ?? false,
+  }
+}
+
+function flag(patch) {
+  return {
+    id: id(),
+    kind: 'flag',
+    name: patch.name ?? '',
+    as: patch.as ?? '',
+    description: patch.description ?? '',
+    value: patch.value ?? false,
+    omitAlways: patch.omitAlways ?? false,
+  }
+}
+
+function stdinPiece() {
+  return { id: id(), kind: 'stdin' }
+}
+
+// ------------------------------------------------------------------ 预览
+const SAMPLE_BY_TYPE = {
+  string: 'value',
+  number: 1.5,
+  integer: 3,
+  boolean: true,
+  array: ['a', 'b'],
+}
+
+function previewValue(piece) {
+  if (piece.sample !== '' && piece.sample !== undefined) return piece.sample
+  if (piece.default !== '' && piece.default !== undefined) {
+    const parsed = tryJson(piece.default)
+    return parsed.ok ? parsed.value : piece.default
+  }
+  return SAMPLE_BY_TYPE[piece.type] ?? 'value'
+}
+
+function tryJson(text) {
+  try {
+    return { ok: true, value: JSON.parse(text) }
+  } catch {
+    return { ok: false }
+  }
+}
+
+function isBlank(value) {
+  if (value === undefined || value === null) return true
+  if (typeof value === 'string') return value === ''
+  if (Array.isArray(value)) return value.length === 0
+  return false
+}
+
+/** 把一个变量片段展开成 0..n 个 argv 元素（镜像宿主 bindings.js）。 */
+function expandVariable(piece, warn) {
+  const value = previewValue(piece)
+  if (piece.omitIfEmpty && isBlank(value)) return []
+
+  if (piece.repeat) {
+    const items = Array.isArray(value) ? value : [value]
+    return items.map((item) => piece.prefix + asText(item, piece) + piece.suffix)
+  }
+  if (piece.join !== '' && piece.join !== undefined) {
+    const items = Array.isArray(value) ? value : [value]
+    return [piece.prefix + items.map((item) => asText(item, piece)).join(piece.join) + piece.suffix]
+  }
+  if (piece.json) {
+    return [piece.prefix + JSON.stringify(value) + piece.suffix]
+  }
+  if (typeof value === 'string' && value.startsWith('-') && !piece.allowLeadingDash) {
+    warn.push(`变量 ${piece.name || '(未命名)'} 的预览值以 - 开头，真正运行会被拒绝（除非勾「允许以 - 开头」）`)
+  }
+  return [piece.prefix + asText(value, piece) + piece.suffix]
+}
+
+function asText(value, piece) {
+  if (Array.isArray(value)) return value.join(piece.join ?? ',')
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return String(value)
+}
+
+function buildPreview() {
+  const warn = []
+  const argv = []
+  const stdin = {}
+
+  const program = state.mode === 'executable' ? state.executable : state.interpreter
+  if (program) argv.push({ kind: 'prog', text: program })
+
+  if (state.mode === 'script') {
+    if (state.script) argv.push({ kind: 'script', text: state.script })
+  } else if (state.mode === 'bash') {
+    if (state.command) argv.push({ kind: 'script', text: '-c' })
+    if (state.command) argv.push({ kind: 'script', text: state.command })
+    // bash 的位置参数需要一个 $0，占位名固定
+    if (state.pieces.some((p) => p.kind === 'variable' && p.transport !== 'stdin')) {
+      argv.push({ kind: 'lit', text: 'custom-tool' })
+    }
+  } else if (state.mode === 'powershell') {
+    argv.push({ kind: 'lit', text: '-NoLogo' })
+    argv.push({ kind: 'lit', text: '-NoProfile' })
+    argv.push({ kind: 'lit', text: '-NonInteractive' })
+    argv.push({ kind: 'script', text: '-Command' })
+    if (state.command) argv.push({ kind: 'script', text: state.command })
+  }
+
+  for (const piece of state.pieces) {
+    if (piece.kind === 'literal') {
+      if (piece.text !== '') argv.push({ kind: 'lit', text: piece.text })
+    } else if (piece.kind === 'flag') {
+      if (piece.value) argv.push({ kind: 'flag', text: piece.as || (piece.name ? '--' + piece.name : '--flag') })
+    } else if (piece.kind === 'variable') {
+      if (piece.transport === 'stdin') {
+        stdin[piece.name || '(未命名)'] = previewValue(piece)
+      } else {
+        for (const text of expandVariable(piece, warn)) argv.push({ kind: 'var', text })
+      }
+    }
+  }
+
+  return { argv, stdin, warn }
+}
+
+function renderPreview() {
+  const { argv, stdin, warn } = buildPreview()
+  const host = document.getElementById('preview')
+  const lines = []
+
+  const chipClass = { prog: 'c-prog', script: 'c-script', lit: 'c-lit', var: 'c-var', flag: 'c-flag' }
+  const chips = argv.map((item) =>
+    `<span class="chip ${chipClass[item.kind] ?? 'c-lit'}" title="${escapeAttr(item.kind)}">${escapeHtml(item.text)}</span>`)
+  lines.push(`<div class="line"><span class="tag">argv</span>${chips.join('') || '<span class="chip empty">（空）</span>'}</div>`)
+
+  const keys = Object.keys(stdin)
+  if (keys.length > 0) {
+    lines.push(`<div class="line"><span class="tag">stdin</span><span class="chip c-stdin">${escapeHtml(JSON.stringify(stdin))}</span></div>`)
+  }
+
+  host.innerHTML = lines.join('')
+  document.getElementById('counts').textContent = `argv ${argv.length} 个元素` + (keys.length ? ` · stdin ${keys.length} 个键` : '')
+
+  const errors = validate()
+  for (const message of warn) errors.push(message)
+  const box = document.getElementById('errors')
+  box.innerHTML = errors.length === 0
+    ? '<div class="none">✓ 没有发现明显问题（保存时宿主还会再校验一次）</div>'
+    : errors.map((message) => `<div>· ${escapeHtml(message)}</div>`).join('')
+}
+
+function validate() {
+  const problems = []
+  const seen = new Map()
+  for (const piece of state.pieces) {
+    if (piece.kind === 'literal') {
+      if (piece.text.trim() === '') problems.push('有一个字面值是空的，它不会出现在 argv 里')
+      continue
+    }
+    if (piece.kind === 'stdin') continue
+    const name = piece.name.trim()
+    if (name === '') { problems.push('有一个片段还没有变量名'); continue }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) problems.push(`变量名 ${name} 只能用字母、数字、下划线，且不能以数字开头`)
+    if (seen.has(name)) problems.push(`变量名 ${name} 重复（第 ${seen.get(name) + 1} 个片段已用过）`)
+    else seen.set(name, state.pieces.indexOf(piece))
+    if (piece.kind === 'flag' && piece.as.trim() === '') problems.push(`开关 ${name} 没写「为真时插入」的文本`)
+    if (piece.kind === 'variable' && piece.transport === 'argv' && piece.repeat && piece.join) {
+      problems.push(`变量 ${name} 同时勾了 repeat 和 join：只能选一个`)
+    }
+  }
+  if (state.mode === 'script' && state.script.trim() === '') problems.push('脚本模式需要脚本路径')
+  if (state.mode === 'executable' && state.executable.trim() === '') problems.push('可执行文件模式需要一个程序')
+  if ((state.mode === 'bash' || state.mode === 'powershell') && state.command.trim() === '') {
+    problems.push('这个模式需要一段固定的命令文本')
+  }
+  if (state.mode === 'powershell' && state.pieces.some((p) => p.kind === 'variable' && p.transport !== 'stdin')) {
+    problems.push('PowerShell 的参数只能走 stdin JSON：-Command 之后的文本会被拼进命令本身，不会进 $args')
+  }
+  if (state.mode === 'bash' && state.pieces.some((p) => p.kind === 'variable' && p.transport === 'stdin')) {
+    problems.push('bash 里参数是位置参数：stdin 同时只用于数据输入时才有意义，建议改用位置传参')
+  }
+  return problems
+}
+
+// ------------------------------------------------------------------ 片段 UI
+function renderPieces() {
+  const host = document.getElementById('pieces')
+  host.innerHTML = ''
+  state.pieces.forEach((piece, index) => {
+    host.appendChild(pieceNode(piece, index))
+  })
+  if (state.pieces.length === 0) {
+    host.innerHTML = '<div class="hint">还没有片段。点右上角「＋ 字面值 / ＋ 变量」开始。</div>'
+  }
+}
+
+function pieceNode(piece, index) {
+  const wrap = el('div', 'piece')
+  const head = el('div', 'head')
+
+  const kind = el('select', 'kind')
+  for (const [value, label] of Object.entries(KINDS)) {
+    const option = document.createElement('option')
+    option.value = value
+    option.textContent = label
+    if (value === piece.kind) option.selected = true
+    kind.appendChild(option)
+  }
+  kind.addEventListener('change', () => {
+    convert(piece, kind.value)
+    renderAll()
+  })
+
+  const main = el('div', 'main')
+  const input = document.createElement('input')
+  input.type = 'text'
+  input.className = 'mono'
+  if (piece.kind === 'literal') {
+    input.value = piece.text
+    input.placeholder = '固定不变的 argv 元素，比如 --line-number'
+    input.addEventListener('input', () => { piece.text = input.value; renderPreview(); refreshRowTitles() })
+  } else if (piece.kind === 'stdin') {
+    input.value = '把全部参数作为一份 JSON 写到 stdin'
+    input.disabled = true
+  } else {
+    input.value = piece.name
+    input.placeholder = piece.kind === 'flag' ? '变量名，如 fixed_strings' : '变量名，如 pattern'
+    input.addEventListener('input', () => {
+      piece.name = input.value
+      renderPreview()
+      renderPieces()
+    })
+  }
+  main.appendChild(input)
+
+  const up = iconBtn('↑', '上移', () => move(index, -1))
+  const down = iconBtn('↓', '下移', () => move(index, 1))
+  const del = iconBtn('×', '删除', () => { state.pieces.splice(index, 1); renderAll() })
+  del.classList.add('danger')
+
+  head.append(kind, main)
+  if (piece.kind === 'variable' || piece.kind === 'flag') {
+    const more = iconBtn(state.open[piece.id] ? '▾' : '▸', '配置', () => {
+      state.open[piece.id] = !state.open[piece.id]
+      renderAll()
+    })
+    head.append(more)
+  }
+  head.append(up, down, del)
+  wrap.appendChild(head)
+
+  if (state.open[piece.id] && (piece.kind === 'variable' || piece.kind === 'flag')) {
+    wrap.classList.add('open')
+    wrap.appendChild(piece.kind === 'variable' ? variableBody(piece) : flagBody(piece))
+  }
+  return wrap
+}
+
+function variableBody(piece) {
+  const body = el('div', 'body')
+
+  // 第一行：类型 / 必填 / 默认值 / 预览值
+  const grid = el('div', 'grid4')
+  grid.appendChild(field('类型', selectEl(TYPES, piece.type, (next) => {
+    piece.type = next
+    if (next === 'array') piece.repeat = piece.repeat || false
+    renderAll()
+  })))
+  grid.appendChild(field('', checkboxEl('必填', piece.required, (next) => { piece.required = next; renderPreview() })))
+  grid.appendChild(field('默认值', textEl(piece.default, '留空 = 没有默认值', (next) => {
+    piece.default = next
+    renderPreview()
+  }, 'mono')))
+  grid.appendChild(field('预览值', textEl(piece.sample, '用于预览的示例', (next) => { piece.sample = next; renderPreview() }, 'mono')))
+  body.appendChild(grid)
+
+  body.appendChild(field('说明', textEl(piece.description, '模型读到的这句：填什么、什么格式', (next) => {
+    piece.description = next
+  })))
+
+  if (piece.type === 'array') {
+    body.appendChild(field('元素类型', selectEl(ITEMS, piece.items, (next) => { piece.items = next })))
+  }
+
+  // 传递方式
+  const transport = el('div', 'row')
+  transport.append(
+    elSpan('传递方式', 'l'),
+    seg(['argv', 'stdin'], piece.transport, (next) => { piece.transport = next; renderAll() }, (option) => option === 'argv' ? 'argv 一个元素' : 'stdin JSON 里的键'),
+  )
+  body.appendChild(transport)
+
+  if (piece.transport === 'argv') {
+    const pills = el('div', 'pills')
+    pills.appendChild(pill('逐项展开（数组）', piece.repeat, (on) => {
+      piece.repeat = on
+      if (on) piece.join = ''
+      renderAll()
+    }))
+    pills.appendChild(pill('合并成一个（数组）', piece.join !== '' && piece.join !== undefined && piece.join !== null, (on) => {
+      if (on) { piece.join = piece.join || ','; piece.repeat = false } else { piece.join = '' }
+      renderAll()
+    }))
+    pills.appendChild(pill('JSON 序列化', piece.json, (on) => { piece.json = on; renderPreview() }))
+    pills.appendChild(pill('空值时不传', piece.omitIfEmpty, (on) => { piece.omitIfEmpty = on; renderPreview() }))
+    pills.appendChild(pill('允许以 - 开头', piece.allowLeadingDash, (on) => { piece.allowLeadingDash = on; renderPreview() }))
+    body.appendChild(pills)
+
+    const pad = el('div', 'grid3')
+    pad.appendChild(field('前缀', textEl(piece.prefix, '如 --glob=', (next) => {
+      piece.prefix = next
+      renderPreview()
+    }, 'mono')))
+    pad.appendChild(field('后缀', textEl(piece.suffix, '如 .json', (next) => {
+      piece.suffix = next
+      renderPreview()
+    }, 'mono')))
+    pad.appendChild(field('合并分隔符', textEl(typeof piece.join === 'string' ? piece.join : '', '如 ,', (next) => {
+      piece.join = next
+      renderPreview()
+    }, 'mono')))
+    body.appendChild(pad)
+
+    body.appendChild(elHint('例：前缀 --glob= + 值 *.js → argv 里是 --glob=*.js 一个元素。'))
+  } else {
+    body.appendChild(elHint('这个变量进 stdin：宿主把全部 stdin 变量打包成一份 JSON，脚本自己 ConvertFrom-Json / json.loads。'))
+  }
+
+  return body
+}
+
+function flagBody(piece) {
+  const body = el('div', 'body')
+  const grid = el('div', 'grid2')
+  grid.appendChild(field('为真时插入', textEl(piece.as, '如 --sort', (next) => {
+    piece.as = next
+    renderPreview()
+  }, 'mono')))
+  grid.appendChild(field('预览', checkboxEl('视为 true', piece.value, (next) => { piece.value = next; renderPreview() })))
+  body.appendChild(grid)
+  body.appendChild(field('说明', textEl(piece.description, '这个开关做什么', (next) => { piece.description = next })))
+  body.appendChild(elHint('开关是布尔参数：模型传 true 时插入上面那段文本，传 false / 不传时不产生任何 argv 元素。'))
+  return body
+}
+
+function convert(piece, nextKind) {
+  if (piece.kind === nextKind) return
+  if (nextKind === 'literal') {
+    Object.keys(piece).forEach((key) => { if (!['id', 'kind'].includes(key)) delete piece[key] })
+    piece.kind = 'literal'
+    piece.text = ''
+    return
+  }
+  if (nextKind === 'stdin') {
+    Object.keys(piece).forEach((key) => { if (!['id', 'kind'].includes(key)) delete piece[key] })
+    piece.kind = 'stdin'
+    return
+  }
+  if (nextKind === 'flag') {
+    piece.kind = 'flag'
+    piece.as = piece.as ?? ''
+    piece.description = piece.description ?? ''
+    piece.value = false
+    delete piece.transport
+    return
+  }
+  piece.kind = 'variable'
+  piece.type = piece.type ?? 'string'
+  piece.transport = piece.transport ?? 'argv'
+  piece.prefix = piece.prefix ?? ''
+  piece.suffix = piece.suffix ?? ''
+  piece.join = piece.join ?? ''
+  piece.repeat = piece.repeat ?? false
+  piece.json = piece.json ?? false
+  piece.omitIfEmpty = piece.omitIfEmpty ?? false
+  piece.allowLeadingDash = piece.allowLeadingDash ?? false
+  piece.required = piece.required ?? false
+  piece.description = piece.description ?? ''
+  piece.default = piece.default ?? ''
+  piece.sample = piece.sample ?? ''
+}
+
+function move(index, delta) {
+  const target = index + delta
+  if (target < 0 || target >= state.pieces.length) return
+  const [item] = state.pieces.splice(index, 1)
+  state.pieces.splice(target, 0, item)
+  renderAll()
+}
+
+function refreshRowTitles() {
+  // 字面值行不需要重画；这里留作扩展点。
+}
+
+// ------------------------------------------------------------------ 模式与预设
+function renderMode() {
+  document.getElementById('row-executable').hidden = state.mode !== 'executable'
+  document.getElementById('row-interpreter').hidden = state.mode !== 'script'
+  document.getElementById('row-script').hidden = state.mode !== 'script'
+  document.getElementById('row-command').hidden = !(state.mode === 'bash' || state.mode === 'powershell')
+  document.getElementById('command-label').textContent = state.mode === 'bash' ? 'Bash 源码' : 'PowerShell 源码'
+  document.getElementById('command-hint').textContent = state.mode === 'bash'
+    ? '模型的值只能经位置参数（"$@"）或 env 进来，永远不会拼进这段文本。'
+    : '参数只能走 stdin JSON：-Command 之后的东西会进命令文本，不是 $args。'
+
+  const segHost = document.getElementById('presets')
+  segHost.innerHTML = ''
+  for (const [value, label] of Object.entries(MODE_LABEL)) {
+    const button = document.createElement('button')
+    button.textContent = label
+    if (value === state.mode) button.className = 'on'
+    button.addEventListener('click', () => { state.mode = value; renderAll() })
+    segHost.appendChild(button)
+  }
+}
+
+function renderPresets() {
+  const host = document.getElementById('preset-bar')
+  if (!host) return
+  host.innerHTML = ''
+  for (const preset of PRESETS) {
+    const button = document.createElement('button')
+    button.textContent = preset.label
+    button.addEventListener('click', () => { preset.apply(); renderAll() })
+    host.appendChild(button)
+  }
+}
+
+// ------------------------------------------------------------------ 小工具
+function el(tag, className) {
+  const node = document.createElement(tag)
+  if (className) node.className = className
+  return node
+}
+
+function elSpan(text, className) {
+  const node = document.createElement('span')
+  if (className) node.className = className
+  node.textContent = text
+  return node
+}
+
+function elHint(text) {
+  const node = el('div', 'hint')
+  node.textContent = text
+  return node
+}
+
+function iconBtn(text, title, onClick) {
+  const button = el('button', 'icon')
+  button.textContent = text
+  button.title = title
+  button.addEventListener('click', onClick)
+  return button
+}
+
+function field(labelText, control) {
+  const wrap = el('label', 'f')
+  if (labelText) wrap.appendChild(elSpan(labelText, 'l'))
+  wrap.appendChild(control)
+  return wrap
+}
+
+function textEl(value, placeholder, onChange, extraClass) {
+  const input = document.createElement('input')
+  input.type = 'text'
+  input.value = value ?? ''
+  input.placeholder = placeholder ?? ''
+  if (extraClass) input.className = extraClass
+  input.addEventListener('input', () => onChange(input.value))
+  return input
+}
+
+function selectEl(options, value, onChange) {
+  const select = document.createElement('select')
+  for (const option of options) {
+    const node = document.createElement('option')
+    node.value = option
+    node.textContent = option
+    if (option === value) node.selected = true
+    select.appendChild(node)
+  }
+  select.addEventListener('change', () => onChange(select.value))
+  return select
+}
+
+function checkboxEl(label, checked, onChange) {
+  const wrap = el('label', 'cb')
+  const input = document.createElement('input')
+  input.type = 'checkbox'
+  input.checked = checked === true
+  input.addEventListener('change', () => onChange(input.checked))
+  wrap.append(input, elSpan(label))
+  return wrap
+}
+
+function pill(label, on, onChange) {
+  const button = el('button', 'pill')
+  button.type = 'button'
+  button.textContent = label
+  if (on) button.classList.add('on')
+  button.addEventListener('click', () => onChange(!on))
+  return button
+}
+
+function seg(options, value, onChange, render) {
+  const host = el('div', 'seg')
+  for (const option of options) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = render ? render(option) : option
+    if (option === value) button.classList.add('on')
+    button.addEventListener('click', () => onChange(option))
+    host.appendChild(button)
+  }
+  return host
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+}
+
+function escapeAttr(text) {
+  return escapeHtml(text).replaceAll('"', '&quot;')
+}
+
+// ------------------------------------------------------------------ 渲染
+function bindStatic() {
+  document.getElementById('executable').addEventListener('input', (event) => {
+    state.executable = event.target.value
+    renderPreview()
+  })
+  document.getElementById('interpreter').addEventListener('input', (event) => {
+    state.interpreter = event.target.value
+    renderPreview()
+  })
+  document.getElementById('script').addEventListener('input', (event) => {
+    state.script = event.target.value
+    renderPreview()
+  })
+  document.getElementById('command').addEventListener('input', (event) => {
+    state.command = event.target.value
+    renderPreview()
+  })
+
+  for (const button of document.querySelectorAll('[data-add]')) {
+    button.addEventListener('click', () => {
+      const kind = button.dataset.add
+      const piece = kind === 'literal' ? literal('')
+        : kind === 'flag' ? flag({})
+          : kind === 'stdin' ? stdinPiece()
+            : variable({})
+      state.pieces.push(piece)
+      state.open[piece.id] = true
+      renderAll()
+    })
+  }
+}
+
+function renderAll() {
+  document.getElementById('executable').value = state.executable
+  document.getElementById('interpreter').value = state.interpreter
+  document.getElementById('script').value = state.script
+  document.getElementById('command').value = state.command
+  renderMode()
+  renderPieces()
+  renderPreview()
+}
+
+// 预设切换器放在「程序」面板标题里，避免再开一节
+function mountPresetBar() {
+  const title = document.querySelector('.panel .title')
+  const bar = el('div', 'row')
+  bar.id = 'preset-bar'
+  bar.style.gap = '6px'
+  title.insertBefore(bar, title.querySelector('.seg'))
+}
+
+bindStatic()
+mountPresetBar()
+renderPresets()
+PRESETS[0].apply()
+renderAll()
+</script>
+</body>
+</html>
