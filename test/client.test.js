@@ -140,3 +140,313 @@ test('the JSON textareas survive parent re-renders', () => {
   assert.match(source, /const serialized = \(input\) => JSON\.stringify\(input \?\? null\)/u)
   assert.match(source, /if \(incoming !== adopted\.current\)/u)
 })
+
+// ---------------------------------------------------------------- argv parity
+
+/**
+ * The page draws an argv strip that it computes locally; the host spawns from
+ * `buildInvocation`. If those two ever disagree the page lies about what will
+ * run, which is worse than showing nothing. This compares them on a matrix of
+ * definitions instead of trusting that the port stayed in sync.
+ */
+function clientInternals() {
+  const exportsObject = loadBundle().factory((name) => {
+    if (name === 'react') return fakeReact()
+    throw new Error(`unexpected require: ${name}`)
+  })
+  assert.ok(exportsObject.__internal, 'the bundle exposes its pure helpers for tests')
+  return exportsObject.__internal
+}
+
+const BASE = {
+  name: 'demo',
+  description: 'test fixture',
+  mode: 'executable',
+  executable: '/usr/bin/demo',
+  args: [],
+  parameters: {},
+}
+
+const PARITY_CASES = [
+  {
+    label: 'literal arguments only',
+    spec: { ...BASE, args: [{ literal: 'run' }, { literal: '--short' }] },
+    values: {},
+  },
+  {
+    label: 'a positional value keeps its spaces and CJK',
+    spec: {
+      ...BASE,
+      args: [{ arg: 'text' }],
+      parameters: { text: { type: 'string', required: true } },
+    },
+    values: { text: 'hello 中文 "quoted"' },
+  },
+  {
+    label: 'prefix and suffix wrap one element',
+    spec: {
+      ...BASE,
+      args: [{ arg: 'glob', prefix: '--glob=', suffix: '' }],
+      parameters: { glob: { type: 'string' } },
+    },
+    values: { glob: '*.ts' },
+  },
+  {
+    label: 'a blank value still emits the prefix',
+    spec: {
+      ...BASE,
+      args: [{ arg: 'format', prefix: '--format=' }],
+      parameters: { format: { type: 'string' } },
+    },
+    values: { format: '' },
+  },
+  {
+    label: 'omitIfEmpty suppresses a blank value',
+    spec: {
+      ...BASE,
+      args: [{ arg: 'format', prefix: '--format=', omitIfEmpty: true }],
+      parameters: { format: { type: 'string' } },
+    },
+    values: { format: '' },
+  },
+  {
+    label: 'a switch expands only when true',
+    spec: {
+      ...BASE,
+      args: [{ flag: 'dry', as: ['--dry-run', '-n'] }],
+      parameters: { dry: { type: 'boolean' } },
+    },
+    values: { dry: true },
+  },
+  {
+    label: 'a false switch contributes nothing',
+    spec: {
+      ...BASE,
+      args: [{ flag: 'dry', as: '--dry-run' }],
+      parameters: { dry: { type: 'boolean' } },
+    },
+    values: { dry: false },
+  },
+  {
+    label: 'repeat emits one element per item',
+    spec: {
+      ...BASE,
+      args: [{ arg: 'paths', repeat: true, prefix: '--path=' }],
+      parameters: { paths: { type: 'array', items: 'string' } },
+    },
+    values: { paths: ['a', 'b'] },
+  },
+  {
+    label: 'join folds an array into one element',
+    spec: {
+      ...BASE,
+      args: [{ arg: 'paths', join: ',' }],
+      parameters: { paths: { type: 'array', items: 'string' } },
+    },
+    values: { paths: ['a', 'b'] },
+  },
+  {
+    label: 'json serialises a structured value',
+    spec: {
+      ...BASE,
+      args: [{ arg: 'payload', json: true }],
+      parameters: { payload: { type: 'array', items: 'number' } },
+    },
+    values: { payload: [1, 2] },
+  },
+  {
+    label: 'an empty array contributes no element',
+    spec: {
+      ...BASE,
+      args: [{ arg: 'paths' }],
+      parameters: { paths: { type: 'array', items: 'string' } },
+    },
+    values: { paths: [] },
+  },
+  {
+    label: 'bash passes values after the argv0 placeholder',
+    spec: {
+      name: 'sh_tool',
+      description: 'bash fixture',
+      mode: 'bash',
+      command: 'printf "%s\\n" "$@"',
+      args: [{ arg: 'value' }],
+      parameters: { value: { type: 'string', required: true } },
+    },
+    values: { value: '-notaflag' },
+    expectError: true,
+  },
+  {
+    label: 'bash with a safe value',
+    spec: {
+      name: 'sh_tool',
+      description: 'bash fixture',
+      mode: 'bash',
+      command: 'printf "%s\\n" "$@"',
+      args: [{ arg: 'value' }],
+      parameters: { value: { type: 'string', required: true } },
+    },
+    values: { value: 'hello' },
+  },
+  {
+    label: 'bash with a leading-dash value allowed per binding',
+    spec: {
+      name: 'sh_tool',
+      description: 'bash fixture',
+      mode: 'bash',
+      command: 'printf "%s\\n" "$@"',
+      args: [{ arg: 'value', allowLeadingDash: true }],
+      parameters: { value: { type: 'string', required: true } },
+    },
+    values: { value: '-n' },
+  },
+  {
+    label: 'stdin json for powershell',
+    spec: {
+      name: 'ps_tool',
+      description: 'powershell fixture',
+      mode: 'powershell',
+      command: '$p = [Console]::In.ReadToEnd(); $p',
+      args: [{ stdin: 'json' }],
+      parameters: { drive: { type: 'string' } },
+    },
+    values: { drive: 'C' },
+  },
+  {
+    label: 'powershell refuses positional arguments',
+    // The host validator rejects this definition outright, so it never reaches
+    // the compiler. Compare against a hand-built plan instead: the page must
+    // draw the same refusal for the same input.
+    spec: {
+      name: 'ps_tool',
+      description: 'powershell fixture',
+      mode: 'powershell',
+      command: 'Get-Date',
+      args: [{ arg: 'drive' }],
+      parameters: { drive: { type: 'string' } },
+    },
+    plan: {
+      name: 'ps_tool',
+      mode: 'powershell',
+      executable: 'pwsh',
+      command: 'Get-Date',
+      flags: ['-NoLogo', '-NoProfile', '-NonInteractive'],
+      args: [{ arg: 'drive' }],
+    },
+    values: { drive: 'C' },
+    expectError: true,
+  },
+  {
+    label: 'stdin raw writes the scalar verbatim',
+    spec: {
+      ...BASE,
+      args: [{ arg: 'body', stdin: 'raw' }],
+      parameters: { body: { type: 'string' } },
+    },
+    values: { body: 'line1\nline2' },
+  },
+  {
+    label: 'script mode puts the interpreter first',
+    spec: {
+      name: 'py_tool',
+      description: 'script fixture',
+      mode: 'script',
+      interpreter: '/usr/bin/python',
+      script: '/tmp/tool.py',
+      args: [{ literal: '--json' }],
+    },
+    values: {},
+  },
+]
+
+test('the page previews the same argv the host would spawn', async () => {
+  const internals = clientInternals()
+  const { compile } = await import('../src/compiler/compile.js')
+  const { buildInvocation } = await import('../src/compiler/bindings.js')
+
+  for (const fixture of PARITY_CASES) {
+    let plan = fixture.plan
+    if (plan === undefined) {
+      const compiled = compile({ tools: [fixture.spec] })
+      const entry = compiled.tools.get(fixture.spec.name)
+      assert.ok(entry, `${fixture.label}: the fixture must compile`)
+      plan = entry.plan
+    }
+    const expected = buildInvocation(plan, fixture.values)
+    const actual = internals.previewInvocation(fixture.spec, fixture.values)
+    // Cross-realm objects: compare data, not prototypes.
+    assert.equal(
+      JSON.stringify({ ok: actual.ok, argv: actual.argv, stdin: actual.stdin }),
+      JSON.stringify({ ok: expected.ok, argv: expected.argv, stdin: expected.stdin }),
+      `preview drifted from buildInvocation for: ${fixture.label}`,
+    )
+    if (fixture.expectError) assert.equal(actual.ok, false, fixture.label)
+  }
+})
+
+test('the page reports the same problems the host validator would refuse', () => {
+  const internals = clientInternals()
+  const bad = [
+    { name: 'Bad Name', description: 'x', mode: 'executable', executable: 'git', args: [] },
+    { name: 'bash', description: 'x', mode: 'executable', executable: 'git', args: [] },
+    { name: 'no_desc', description: '', mode: 'executable', executable: 'git', args: [] },
+    { name: 'no_target', description: 'x', mode: 'executable', args: [] },
+    {
+      name: 'dangling',
+      description: 'x',
+      mode: 'executable',
+      executable: 'git',
+      args: [{ arg: 'missing' }],
+      parameters: {},
+    },
+    {
+      name: 'switch_on_string',
+      description: 'x',
+      mode: 'executable',
+      executable: 'git',
+      args: [{ flag: 'word', as: '--word' }],
+      parameters: { word: { type: 'string' } },
+    },
+    {
+      name: 'too_slow',
+      description: 'x',
+      mode: 'executable',
+      executable: 'git',
+      timeoutMs: 900000,
+      args: [],
+    },
+  ]
+  const issues = internals.collectIssues(bad)
+  const messages = issues.map((issue) => `${issue.toolName}:${issue.path}`)
+  assert.ok(messages.includes('Bad Name:name'), 'name pattern')
+  assert.ok(messages.includes('bash:name'), 'reserved name')
+  assert.ok(messages.includes('no_desc:description'), 'empty description')
+  assert.ok(messages.includes('no_target:executable'), 'missing executable')
+  assert.ok(messages.includes('dangling:args[0]'), 'undeclared parameter')
+  assert.ok(messages.includes('switch_on_string:args[0]'), 'switch on a non-boolean')
+  assert.ok(messages.includes('too_slow:timeoutMs'), 'timeout range')
+
+  // And a clean definition produces no error at all.
+  const clean = internals.collectIssues([{
+    name: 'ok_tool',
+    description: 'x',
+    mode: 'executable',
+    executable: 'git',
+    args: [{ literal: 'status' }],
+  }])
+  assert.equal(clean.length, 0, 'a valid definition draws no complaints')
+})
+
+test('the page tracks unsaved edits without touching the saved snapshot', () => {
+  // The dirty chip and the disabled Save button both hinge on this comparison
+  // existing; a page that silently allowed "save" with no changes would bump
+  // the revision for nothing.
+  assert.match(source, /const dirty = !sameJson\(config, baseline\)/u)
+  assert.match(source, /setSaved\(clone\(config\)\)/u)
+})
+
+test('the sandbox selector from the old mock is gone', () => {
+  // The plugin runs tools with the harness's own privileges; a sandbox field in
+  // the form would either be a lie or an unreachable setting.
+  assert.doesNotMatch(source, /workspace-write|danger-full-access|read-only/u)
+})
