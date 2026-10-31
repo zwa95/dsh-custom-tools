@@ -236,7 +236,7 @@
     <button class="ghost" data-add="literal">＋ 字面值</button>
     <button class="ghost" data-add="variable">＋ 变量</button>
     <button class="ghost" data-add="flag">＋ 开关</button>
-    <button class="ghost" data-add="stdin">＋ stdin</button>
+    <button class="ghost" data-add="stdin">＋ 全部走 stdin</button>
   </div>
 
   <div class="pieces" id="pieces"></div>
@@ -356,9 +356,9 @@ const PRESETS = [
         script: '',
         command: "$ErrorActionPreference = 'Stop'\n$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json\nGet-ChildItem -LiteralPath $payload.path -File -Recurse |\n  Where-Object { $_.LastWriteTime -ge (Get-Date).AddDays(-[int]$payload.days) } |\n  Select-Object -First $payload.limit FullName, LastWriteTime",
         pieces: [
-          variable({ name: 'path', type: 'string', description: '搜索起点', transport: 'stdin' }),
-          variable({ name: 'days', type: 'integer', description: '最近几天', transport: 'stdin' }),
-          variable({ name: 'limit', type: 'integer', description: '最多几条', transport: 'stdin' }),
+          variable({ name: 'path', type: 'string', description: '搜索起点' }),
+          variable({ name: 'days', type: 'integer', description: '最近几天' }),
+          variable({ name: 'limit', type: 'integer', description: '最多几条' }),
         ],
       })
     },
@@ -383,7 +383,6 @@ function variable(patch) {
     required: patch.required ?? false,
     description: patch.description ?? '',
     default: patch.default ?? '',
-    transport: patch.transport ?? 'argv',
     prefix: patch.prefix ?? '',
     suffix: patch.suffix ?? '',
     join: patch.join ?? '',
@@ -440,6 +439,9 @@ function buildPreview() {
   const warn = []
   const argv = []
   const stdin = []
+  // 变量进 argv 还是进 stdin 由模式决定；再点一条「stdin（JSON）」就把它们全改成走 stdin。
+  const toStdin = state.mode === 'powershell' || state.pieces.some((piece) => piece.kind === 'stdin')
+  const stdinNames = []
 
   const program = state.mode === 'executable' ? state.executable : state.interpreter
   if (program) argv.push({ kind: 'prog', text: program })
@@ -452,7 +454,7 @@ function buildPreview() {
       argv.push({ kind: 'script', text: state.command })
     }
     // bash 的位置参数需要一个 $0，占位名固定
-    if (state.pieces.some((piece) => piece.kind === 'variable' && piece.transport !== 'stdin')) {
+    if (!toStdin && state.pieces.some((piece) => piece.kind === 'variable')) {
       argv.push({ kind: 'lit', text: 'custom-tool' })
     }
   } else if (state.mode === 'powershell') {
@@ -480,14 +482,17 @@ function buildPreview() {
       continue
     }
     if (piece.kind === 'variable') {
-      if (piece.transport === 'stdin') {
-        stdin.push({ name: piece.name })
+      // PowerShell 的 -Command 不绑定位置参数，所以它只有一条路：整份 JSON 走 stdin。
+      // 其余三种模式默认进 argv；作者显式加一条 stdin 片段时也改走 stdin。
+      if (toStdin) {
+        stdinNames.push(piece.name)
         continue
       }
       argv.push(...variableChips(piece))
     }
   }
 
+  if (toStdin && stdinNames.length > 0) stdin.push({ names: stdinNames })
   return { argv, stdin, warn }
 }
 
@@ -518,9 +523,9 @@ function renderPreview() {
   lines.push(`<div class="line"><span class="tag">argv</span>${argv.map(chipFor).join('') || '<span class="chip empty">（空）</span>'}</div>`)
 
   if (stdin.length > 0) {
-    const chips = stdin.map((entry) =>
-      `<span class="chip c-stdin"><b class="nm">${escapeHtml(entry.name || '(未命名)')}</b><i>JSON</i></span>`)
-    lines.push(`<div class="line"><span class="tag">stdin</span>${chips.join('')}</div>`)
+    const chips = stdin.map((entry) => entry.names.map((name) =>
+      `<span class="chip c-stdin"><b class="nm">${escapeHtml(name || '(未命名)')}</b><i>JSON 键</i></span>`).join(''))
+    lines.push(`<div class="line"><span class="tag">stdin</span>${chips.join('')}<span class="chip empty">一份 JSON 对象，键名就是上面这些</span></div>`)
   }
 
   host.innerHTML = lines.join('')
@@ -529,7 +534,7 @@ function renderPreview() {
   document.getElementById('counts').textContent =
     `argv ${real} 个元素`
     + (off > 0 ? ` · ${off} 个开关未启用` : '')
-    + (stdin.length ? ` · stdin ${stdin.length} 个键` : '')
+    + (stdin.length ? ` · stdin ${stdin[0].names.length} 个键` : '')
 
   const errors = validate()
   for (const message of warn) errors.push(message)
@@ -554,20 +559,17 @@ function validate() {
     if (seen.has(name)) problems.push(`变量名 ${name} 重复（第 ${seen.get(name) + 1} 个片段已用过）`)
     else seen.set(name, state.pieces.indexOf(piece))
     if (piece.kind === 'flag' && piece.as.trim() === '') problems.push(`开关 ${name} 没写「为真时插入」的文本`)
-    if (piece.kind === 'variable' && piece.transport === 'argv' && piece.repeat && piece.join) {
+    if (piece.kind === 'variable' && piece.repeat && piece.join) {
       problems.push(`变量 ${name} 同时勾了 repeat 和 join：只能选一个`)
     }
+  }
+  if (state.mode === 'powershell' && state.pieces.some((piece) => piece.kind === 'stdin')) {
+    problems.push('PowerShell 本来就自动走 stdin，不用再加一条「stdin（JSON）」片段')
   }
   if (state.mode === 'script' && state.script.trim() === '') problems.push('脚本模式需要脚本路径')
   if (state.mode === 'executable' && state.executable.trim() === '') problems.push('可执行文件模式需要一个程序')
   if ((state.mode === 'bash' || state.mode === 'powershell') && state.command.trim() === '') {
     problems.push('这个模式需要一段固定的命令文本')
-  }
-  if (state.mode === 'powershell' && state.pieces.some((p) => p.kind === 'variable' && p.transport !== 'stdin')) {
-    problems.push('PowerShell 的参数只能走 stdin JSON：-Command 之后的文本会被拼进命令本身，不会进 $args')
-  }
-  if (state.mode === 'bash' && state.pieces.some((p) => p.kind === 'variable' && p.transport === 'stdin')) {
-    problems.push('bash 里参数是位置参数：stdin 同时只用于数据输入时才有意义，建议改用位置传参')
   }
   return problems
 }
@@ -671,15 +673,8 @@ function variableBody(piece) {
     body.appendChild(field('元素类型', selectEl(ITEMS, piece.items, (next) => { piece.items = next })))
   }
 
-  // 传递方式
-  const transport = el('div', 'row')
-  transport.append(
-    elSpan('传递方式', 'l'),
-    seg(['argv', 'stdin'], piece.transport, (next) => { piece.transport = next; renderAll() }, (option) => option === 'argv' ? 'argv 一个元素' : 'stdin JSON 里的键'),
-  )
-  body.appendChild(transport)
-
-  if (piece.transport === 'argv') {
+  // 拼进 argv 还是写进 stdin 由模式决定，不让作者逐个变量选。
+  if (state.mode !== 'powershell') {
     const pills = el('div', 'pills')
     pills.appendChild(pill('逐项展开（数组）', piece.repeat, (on) => {
       piece.repeat = on
@@ -712,7 +707,7 @@ function variableBody(piece) {
 
     body.appendChild(elHint('例：前缀 --glob= + 值 *.js → argv 里是 --glob=*.js 一个元素。'))
   } else {
-    body.appendChild(elHint('这个变量进 stdin：宿主把全部 stdin 变量打包成一份 JSON，脚本自己 ConvertFrom-Json / json.loads。'))
+    body.appendChild(elHint('PowerShell 的 -Command 收不到位置参数，所以参数统一打包成一份 JSON 写到 stdin：脚本用 [Console]::In.ReadToEnd() | ConvertFrom-Json 取键值。这个模式下没有前缀/后缀可配。'))
   }
 
   return body
@@ -750,12 +745,10 @@ function convert(piece, nextKind) {
     piece.as = piece.as ?? ''
     piece.description = piece.description ?? ''
     piece.value = false
-    delete piece.transport
     return
   }
   piece.kind = 'variable'
   piece.type = piece.type ?? 'string'
-  piece.transport = piece.transport ?? 'argv'
   piece.prefix = piece.prefix ?? ''
   piece.suffix = piece.suffix ?? ''
   piece.join = piece.join ?? ''
