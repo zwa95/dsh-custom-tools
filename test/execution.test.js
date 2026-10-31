@@ -209,3 +209,42 @@ test('ssh-style flags with = stay one element', async () => {
   const value = await runCustomTool(fake.services, entryOf(spec), { key: 'a b' }, {})
   assert.deepEqual(value.argv, ['/usr/bin/demo', 'run', '--key=a b'])
 })
+
+test('a real agent resolves the sandbox tier from its session', async () => {
+  const fake = services()
+  const requests = []
+  fake.services.sandboxPolicy = {
+    resolve(request) {
+      requests.push(request)
+      return { mode: 'read-only', sessionId: 'sess-1' }
+    },
+  }
+  const session = { id: 'sess-1' }
+
+  const value = await runCustomTool(
+    fake.services,
+    entryOf(tool({ sandbox: 'workspace-write' })),
+    { target: 'x' },
+    { agent: { session } },
+  )
+
+  assert.equal(value.ok, true)
+  assert.equal(value.sandbox.session, 'read-only')
+  assert.equal(value.sandbox.effective, 'read-only')
+  assert.deepEqual(requests, [{ session }])
+})
+
+test('an agentless call resolves the deployment default', async () => {
+  const fake = services()
+  const requests = []
+  fake.services.sandboxPolicy = {
+    resolve(request) {
+      requests.push(request)
+      return { mode: 'workspace-write' }
+    },
+  }
+
+  await runCustomTool(fake.services, entryOf(tool()), { target: 'x' }, {})
+
+  assert.deepEqual(requests, [{}], 'no session is invented when there is no agent')
+})

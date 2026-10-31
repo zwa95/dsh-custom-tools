@@ -10,6 +10,8 @@
  * `test` call {@link Manager.preview} / {@link Manager.test}, which call the
  * same `runCustomTool` a model call reaches.
  */
+import { validateTool } from '../config/validate.js'
+
 const HELP = [
   '用法：/custom-tools <子命令>',
   '',
@@ -20,6 +22,8 @@ const HELP = [
   '  test <name> [json]         真实执行一次（与模型调用同一条流水线）',
   '  enable <name>              启用一个工具',
   '  disable <name>             禁用一个工具（在途调用会被取消）',
+  '  add <json>                 添加或替换一个工具（整份定义，先校验后写入）',
+  '  export                     导出当前全部工具定义（JSON，可直接再 add 回来）',
   '',
   '参数 [json] 是一个 JSON 对象，例如：{"query":"dsh","limit":5}',
 ].join('\n')
@@ -122,6 +126,23 @@ function renderPreview(result) {
   return lines.join('\n')
 }
 
+/**
+ * Read this plugin's settings row: the only writer path is `mutate()` with the
+ * revision the document reported, so a command racing the browser conflicts
+ * instead of overwriting it.
+ */
+function readDocument(ctx, namespace) {
+  const settings = ctx.get('settings')
+  if (!settings) return { error: '当前部署没有加载 settings 服务，无法读取或修改配置' }
+  const descriptor = settings.describe()?.find?.((row) => row.ns === namespace)
+  if (!descriptor) return { error: `找不到配置项 ${namespace}` }
+  return { settings, descriptor, tools: descriptor.value?.tools ?? [] }
+}
+
+function renderIssues(issues) {
+  return issues.map((issue) => `- ${issue.code} ${issue.path}: ${issue.message}`).join('\n')
+}
+
 function renderTest(result) {
   if (result === undefined) return err('没有找到这个工具')
   const lines = []
@@ -147,28 +168,71 @@ function renderTest(result) {
  */
 export function registerCommands(ctx, { manager, namespace }) {
   const flipEnabled = async (name, enabled) => {
-    const entry = manager.currentEntry(name)
-    if (!entry) return err(`没有找到工具 ${name}`)
+    const doc = readDocument(ctx, namespace)
+    if (doc.error) return err(doc.error)
 
-    const settings = ctx.get('settings')
-    if (!settings) return err('当前部署没有加载 settings 服务，无法修改配置')
-
-    const descriptor = settings.describe()?.find?.((row) => row.ns === namespace)
-    if (!descriptor) return err(`找不到配置项 ${namespace}`)
-
-    const index = [...manager.current.tools.keys()].indexOf(name)
+    const index = doc.tools.findIndex((tool) => tool?.name === name)
     if (index === -1) return err(`没有找到工具 ${name}`)
 
     try {
-      await settings.mutate(
+      await doc.settings.mutate(
         namespace,
         [{ op: 'set', path: ['tools', index, 'enabled'], value: enabled }],
-        descriptor.revision,
+        doc.descriptor.revision,
       )
     } catch (error) {
       return err(`修改配置失败：${error instanceof Error ? error.message : String(error)}`)
     }
     return ok(`已${enabled ? '启用' : '禁用'} ${name}。`)
+  }
+
+  /**
+   * `add` exists because the first tool is the hardest step: assembling twelve
+   * fields in a form is where people stop. A whole definition pasted as JSON is
+   * validated here, before anything is written, and saved as one upsert.
+   */
+  const addTool = async (text) => {
+    if (text === '') return err('用法：/custom-tools add <工具定义 JSON>')
+    let spec
+    try {
+      spec = JSON.parse(text)
+    } catch (error) {
+      return err(`不是合法 JSON：${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) {
+      return err('工具定义必须是一个 JSON 对象')
+    }
+
+    const issues = validateTool(spec, 'tool')
+    if (issues.length > 0) {
+      return err(`定义没有通过校验，未写入任何内容：\n${renderIssues(issues)}`)
+    }
+
+    const doc = readDocument(ctx, namespace)
+    if (doc.error) return err(doc.error)
+
+    const index = doc.tools.findIndex((tool) => tool?.name === spec.name)
+    const replacing = index !== -1
+    const tools = replacing
+      ? doc.tools.map((tool, position) => (position === index ? spec : tool))
+      : [...doc.tools, spec]
+
+    try {
+      await doc.settings.mutate(
+        namespace,
+        [{ op: 'set', path: ['tools'], value: tools }],
+        doc.descriptor.revision,
+      )
+    } catch (error) {
+      return err(`写入配置失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+    return ok(`已${replacing ? '替换' : '添加'} ${spec.name}。用 /custom-tools preview ${spec.name} 检查 argv。`)
+  }
+
+  const exportTools = () => {
+    const doc = readDocument(ctx, namespace)
+    if (doc.error) return err(doc.error)
+    return ok(JSON.stringify(doc.tools, null, 2))
   }
 
   // `ctx.commands` is a guarded service: property access throws unless `commands`
@@ -180,7 +244,7 @@ export function registerCommands(ctx, { manager, namespace }) {
   return ctx.effect(() => commands.register({
     name: 'custom-tools',
     description: '查看、预览、试运行、启用或禁用自定义工具',
-    input: { hint: 'list | status | show <name> | preview <name> [json] | test <name> [json] | enable|disable <name>' },
+    input: { hint: 'list | status | show <name> | preview <name> [json] | test <name> [json] | enable|disable <name> | add <json> | export' },
     handler: async ({ rawInput, agent, signal }) => {
       const { verb, rest } = splitInput(rawInput)
 
@@ -214,6 +278,9 @@ export function registerCommands(ctx, { manager, namespace }) {
         if (name === '') return err(`用法：/custom-tools ${verb} <name>`)
         return flipEnabled(name, verb === 'enable')
       }
+
+      if (verb === 'add') return addTool(rest)
+      if (verb === 'export') return exportTools()
 
       return err(`未知子命令 ${verb}。\n\n${HELP}`)
     },

@@ -1,0 +1,33 @@
+{
+  "name": "ripgrep_search",
+  "title": "代码搜索",
+  "description": "用 ripgrep 在仓库内搜索文本，返回带行号的匹配行。只读命令。",
+  "whenToUse": "在代码库里查找某个符号、字符串或错误信息出现在哪里时使用；参数以独立 argv 元素传入，不会被 shell 解释。",
+  "mode": "executable",
+  "executable": "rg",
+  "args": [
+    { "literal": "--line-number" },
+    { "literal": "--no-heading" },
+    { "literal": "--color=never" },
+    { "arg": "pattern" },
+    { "arg": "path", "omitIfEmpty": true }
+  ],
+  "cwd": ".",
+  "sandbox": "read-only",
+  "approval": "inherit",
+  "concurrency": "parallel",
+  "timeoutMs": 60000,
+  "parameters": {
+    "pattern": {
+      "type": "string",
+      "required": true,
+      "description": "要搜索的文本或正则表达式"
+    },
+    "path": {
+      "type": "string",
+      "description": "限定搜索的子目录或文件；留空表示整个工作区"
+    }
+  },
+  "output": { "parse": "text" },
+  "examples": [{ "name": "找一下 createServer 在哪", "args": { "pattern": "createServer" } }]
+}

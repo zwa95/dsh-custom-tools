@@ -1,0 +1,22 @@
+{
+  "name": "project_metadata",
+  "title": "项目元信息",
+  "description": "运行一个固定命令，把 package.json 的名称、版本和脚本名输出成 JSON，再由本插件按声明校验后交给模型。演示 json 输出契约。",
+  "whenToUse": "需要结构化的项目信息（而不是一段给人看的文本）时使用；输出不合法或不符合 schema 会以 OUTPUT_SCHEMA_MISMATCH / INVALID_JSON_OUTPUT 失败，而不是把半截 JSON 交给模型。",
+  "mode": "executable",
+  "executable": "node",
+  "args": [
+    { "literal": "-e" },
+    { "literal": "const p=require('./package.json');process.stdout.write(JSON.stringify({name:p.name,version:p.version,scripts:Object.keys(p.scripts??{})}))" }
+  ],
+  "cwd": ".",
+  "sandbox": "read-only",
+  "approval": "inherit",
+  "concurrency": "parallel",
+  "timeoutMs": 30000,
+  "parameters": {},
+  "output": {
+    "parse": "json",
+    "schema": "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"},\"scripts\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"name\",\"version\"],\"additionalProperties\":false}"
+  }
+}

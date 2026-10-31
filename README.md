@@ -81,7 +81,14 @@ starting with `-` or `@` are rejected unless the entry sets `allowLeadingDash` o
 /custom-tools preview <name> {"query":"dsh"}   # prints argv, cwd, sandbox — runs nothing
 /custom-tools test <name> {"query":"dsh"}      # same pipeline as a model call
 /custom-tools enable|disable <name>
+/custom-tools add <json>                       # whole definition, validated before it is written
+/custom-tools export                           # every definition as JSON, ready to `add` back
 ```
+
+[folder `examples/`](examples/) ships five definitions you can paste straight into `add`: a fixed
+executable, an `rg` search with a parameter, a script with a fixed interpreter, a PowerShell snippet
+whose parameters land in `$args`, and a `parse: "json"` tool with an output schema. The test suite
+validates and compiles all of them, so they cannot drift from the real schema.
 
 `preview` is the fastest way to find out why a tool isn't doing what you meant: it shows the exact
 argv the model's arguments would produce.

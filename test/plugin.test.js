@@ -206,3 +206,51 @@ test('teardown unregisters every tool it registered', async () => {
 
   assert.equal(fake.tools.has('demo_tool'), false)
 })
+
+test('a deployment without the commands service still mounts the tools', async () => {
+  const fake = fakeContext()
+  // Cordis resolves `ctx.commands` through a proxy that throws for any service
+  // not declared in `inject`; the plugin must read it through `ctx.get()` so an
+  // absent slash-command service degrades instead of failing the whole row.
+  delete fake.ctx.commands
+  const config = { tools: ref([TOOL]), deferLoading: ref(false) }
+
+  apply(fake.ctx, config)
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.ok(fake.tools.has('demo_tool'), 'tools are independent of the command service')
+  assert.equal(fake.commands.size, 0, 'no command is registered')
+})
+
+test('add validates the whole definition before writing it', async () => {
+  const fake = fakeContext()
+  const writes = []
+  fake.ctx.settings = {
+    describe: () => [{ ns: 'custom-tools', revision: 7, value: { tools: [], deferLoading: false } }],
+    async mutate(ns, ops, revision) {
+      writes.push({ ns, ops, revision })
+    },
+  }
+  apply(fake.ctx, { tools: ref([]), deferLoading: ref(false) })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  const handler = fake.commands.get('custom-tools').handler
+
+  const rejected = await handler({ rawInput: 'add {"name":"Bad Name","description":"x","executable":"node"}', signal: undefined })
+  assert.equal(rejected.kind, 'error')
+  assert.match(rejected.text, /TOOL_NAME_FORMAT/)
+  assert.equal(writes.length, 0, 'nothing is written when validation fails')
+
+  const accepted = await handler({
+    rawInput: `add ${JSON.stringify(TOOL)}`,
+    signal: undefined,
+  })
+  assert.equal(accepted.kind, 'success')
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].revision, 7)
+  assert.deepEqual(writes[0].ops, [{ op: 'set', path: ['tools'], value: [TOOL] }])
+
+  const exported = await handler({ rawInput: 'export', signal: undefined })
+  assert.equal(exported.kind, 'success')
+  assert.deepEqual(JSON.parse(exported.text), [])
+})

@@ -1,0 +1,25 @@
+{
+  "name": "node_script",
+  "title": "运行 Node 脚本",
+  "description": "用固定解释器运行仓库里的一个 .mjs 脚本，并把一个字符串参数作为 argv 传进去。脚本路径由作者固定，模型只能填参数值。",
+  "whenToUse": "当仓库里已经有一个可信的小工具脚本（例如 tools/report.mjs）需要按参数反复运行时使用。",
+  "mode": "script",
+  "interpreter": "node",
+  "script": "tools/report.mjs",
+  "scriptTrust": "trusted-path",
+  "args": [{ "arg": "topic" }],
+  "cwd": ".",
+  "sandbox": "workspace-write",
+  "approval": "inherit",
+  "concurrency": "exclusive",
+  "timeoutMs": 120000,
+  "encodingDefaults": true,
+  "parameters": {
+    "topic": {
+      "type": "string",
+      "required": true,
+      "description": "传给脚本的单一主题参数"
+    }
+  },
+  "output": { "parse": "text" }
+}
