@@ -666,7 +666,11 @@ Node:  [node,  scriptPath, ...mappedArgs]
 `PREAMBLE` 复用官方 UTF-8 preamble（`...\dsh-pwsh-local\lib\index.js:87-104`）。
 
 **Windows 边界（已定）**：`pwsh` 7 优先，缺失时回退 `powershell.exe`；`.exe/.com` 走 executable；`.bat/.cmd` **排除**（`cmd.exe` 二次解析无法结构性保证）。
-**bash 在 Windows 只能以 `danger-full-access` 运行**（实测）：PATH 上的 `bash` 通常是 `C:\Windows\System32\bash.exe`（WSL 启动器，返回 UTF-16LE 的 `Bash/E_ACCESSDENIED`）；改用真实 MSYS2/Git Bash 后，它在受限令牌下连运行时都初始化不了——`Git\bin\bash.exe` 死于 `couldn't create signal pipe, Win32 error 5`（`0xC0000142`），更新的 msys2 运行时死于 `NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0S5-<hash>): 0xC0000022`；`read-only` 与 `workspace-write` 表现相同，同目录的 `ls.exe` 同样失败，而 mingw 原生 `git.exe` 正常。因此非 full-access 下早退 `BASH_SANDBOX_UNSUPPORTED`，而不是给出模糊的 runner 失败。
+**bash 在 Windows 的受限档位只有一种运行时可用**（实测）：PATH 上的 `bash` 通常是 `C:\Windows\System32\bash.exe`（WSL 启动器，返回 UTF-16LE 的 `Bash/E_ACCESSDENIED`）；改用真实 MSYS2/Git Bash 后，它在受限令牌下连运行时都初始化不了——`Git\bin\bash.exe` 死于 `couldn't create signal pipe, Win32 error 5`（`0xC0000142`），更新的 msys2 运行时死于 `NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0S5-<hash>): 0xC0000022`；`read-only` 与 `workspace-write` 表现相同，同目录的 `ls.exe` 同样失败，而 mingw 原生 `git.exe` 正常。
+
+唯一例外是 `dsh-ops` 自带并 stage 出去的那份运行时：pinned MSYS payload + `opsipc.dll`/`opsnt.dll` 两个 IPC 兼容代理，落在 `$DSH_HOME/dsh-ops/bash-ipc/<identity>/usr/bin/bash.exe`（`dsh-ops/lib/bash-ipc.js:confinedBash()` 生成，`restrictedRemedy()` 也明说自定义 bashPath「works only in danger-full-access」）。用未打补丁的官方 runner 实测：`bash -c`、`$0`/`$@` 位置传参（含空格、引号、内嵌换行、中文、`--notaflag`）、stdin 往返、`exit 7`、stdout/stderr 分离、staged `ls.exe` 全部正常，且**工作区外写仍被拒**（builtin 重定向与 staged `touch` 双证），`--mode read-only` 也成立。两个硬约束：子进程 PATH 必须以 staged 树打头（`<root>/usr/bin`、`<root>/ucrt64/bin`、`<root>/cmd`，再拼 ambient），否则外部命令解析到另一份未锁定 msys 并死于 signal pipe；Low IL 下 `$HOME` 只读，可写处只有工作区与 runner temp。
+
+因此执行期策略是：`win32 + mode:bash + 受限档位 + executable 未钉死` 时用 `src/execution/dshbash.js` 的 `resolveStagedBash()` 找那份 staged 运行时（要求 `bash.exe` + `msys-2.0.dll` + `opsipc.dll` 齐全，按 mtime 取最新），并用 `pathWithStaged()` 把它自己的目录插到 PATH 最前；找不到则早退 `BASH_SANDBOX_UNSUPPORTED` 并说明原因。作者显式钉死 `executable` 时**不替换**（尊重作者意图；钉死普通 bash 在受限档位下仍会失败），full-access 档位走原来的 `bashCandidates()` 搜索。
 
 ### 5.3 声明式参数映射 grammar（补完 F3 三个硬墙）
 

@@ -19,6 +19,7 @@ import { hintFor, classifyExit } from './classify.js'
 import { stricter, isFullAccess, confinementPolicy } from './sandbox.js'
 import { encodingDefaultsFor, interpreterKey, mergeEncodingEnv, withArgvPrefix } from './encoding.js'
 import { bashCandidates, isStubBash, POWERSHELL_FALLBACK } from './interpreters.js'
+import { pathWithStaged, resolveStagedBash } from './dshbash.js'
 import { validateJsonSubset } from './jsonschema.js'
 
 const STDOUT_LIMIT = 1_000_000
@@ -156,6 +157,27 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
     credentialEnv[binding.env] = value
   }
 
+  // 4b — the sandbox tier, resolved before the interpreter is chosen: on Windows
+  // the only bash that can start inside the restricted token is dsh-ops' staged
+  // payload, and that choice depends on whether this call will be confined.
+  let policy = {}
+  // The public execution context carries no session, but a real agent does: when
+  // one is present the session policy participates, so a tool can only ever be
+  // narrowed below what the conversation already permits. Agentless calls (the
+  // slash-command test path) resolve against the deployment default.
+  const resolveRequest = exec?.agent?.session ? { session: exec.agent.session } : {}
+  try {
+    policy = services.sandboxPolicy?.resolve(resolveRequest) ?? {}
+  } catch (error) {
+    return failWith('SANDBOX_UNAVAILABLE',
+      `无法解析沙箱策略：${error instanceof Error ? error.message : String(error)}`)
+  }
+  const declared = plan.sandbox
+  const session = policy.mode ?? 'workspace-write'
+  const effective = stricter(declared, session)
+  const platform = options.platform ?? process.platform
+  const confined = !isFullAccess(effective)
+
   // 5 — executable / interpreter / script
   const lookupEnv = { ...(plan.env ?? {}) }
   const resolveExecutable = async (name, code) => {
@@ -177,13 +199,42 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
   const targetName = plan.mode === 'script' ? plan.interpreter : plan.executable
   const usesDefaultBash = plan.mode === 'bash' && plan.executable === 'bash'
   const usesDefaultPwsh = plan.mode === 'powershell' && plan.executable === 'pwsh'
-  const resolvedTarget = await resolveExecutable(targetName, 'EXECUTABLE_NOT_FOUND')
+  const windowsConfinedBash = platform === 'win32' && plan.mode === 'bash' && confined
+
+  // Windows: every MSYS2/Cygwin runtime dies inside the restricted token before
+  // argv is parsed. The one exception is the pinned MSYS payload dsh-ops patches
+  // and stages with its IPC proxies; use it when it is present, and remember to
+  // put its own directories first on PATH (an inherited PATH resolves `cat` to a
+  // different, unpinned tree, which then dies the same way).
+  let stagedBash
+  if (windowsConfinedBash && usesDefaultBash) {
+    const findStaged = options.findStagedBash ?? (() => resolveStagedBash(process.env))
+    stagedBash = findStaged()
+  }
+
+  const resolvedTarget = stagedBash !== undefined
+    ? { path: stagedBash.file }
+    : await resolveExecutable(targetName, 'EXECUTABLE_NOT_FOUND')
 
   if (resolvedTarget.error === 'CUSTOM_TOOL_INTERNAL') {
     return failWith('CUSTOM_TOOL_INTERNAL', resolvedTarget.detail ?? 'subprocess 服务不可用')
   }
 
   let interpreterPath = resolvedTarget.error ? undefined : resolvedTarget.path
+
+  // Confined bash on Windows has exactly one working runtime (the staged dsh-ops
+  // payload); if it is not there, say so now instead of surfacing a runner failure.
+  if (windowsConfinedBash && stagedBash === undefined) {
+    return failWith('BASH_SANDBOX_UNSUPPORTED',
+      usesDefaultBash
+        ? 'Windows 上的 bash 在沙箱里只能跑 dsh-ops 的 staged 运行时，当前找不到它'
+          + '（$DSH_HOME/dsh-ops/bash-ipc/<identity>/usr/bin/bash.exe 不存在）。'
+          + '请先让 dsh-ops 准备好受限 bash，或把该工具的 sandbox 设为 '
+          + 'danger-full-access，或改用 mode: powershell / mode: executable'
+        : 'Windows 上的 bash 在沙箱里只能跑 dsh-ops 的 staged 运行时；'
+          + '显式指定的 executable（如 Git Bash / MSYS2）无法在受限令牌里启动。'
+          + '请留空 executable 让插件挑 staged bash，或把 sandbox 设为 danger-full-access')
+  }
 
   // Windows ships `bash` as the WSL launcher: it resolves, then dies inside a
   // confined run with an opaque E_ACCESSDENIED. Look for a real bash instead.
@@ -248,28 +299,19 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
     ...plan.env,
     ...credentialEnv,
   }
+  // The staged bash resolves `cat`, `ls`, … through its own tree; an inherited
+  // PATH points at a different, unpinned MSYS install whose binaries die in the
+  // restricted token.
+  if (stagedBash !== undefined) {
+    env.PATH = pathWithStaged(stagedBash.directories, env.PATH ?? process.env.PATH ?? '')
+  }
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined || value === null) delete env[key]
   }
   const argv = withArgvPrefix(invocation.argv, encoding.argvPrefix)
   base.argv = argv
 
-  // 8 — sandbox tier and confinement
-  let policy = {}
-  // The public execution context carries no session, but a real agent does: when
-  // one is present the session policy participates, so a tool can only ever be
-  // narrowed below what the conversation already permits. Agentless calls (the
-  // slash-command test path) resolve against the deployment default.
-  const resolveRequest = exec?.agent?.session ? { session: exec.agent.session } : {}
-  try {
-    policy = services.sandboxPolicy?.resolve(resolveRequest) ?? {}
-  } catch (error) {
-    return failWith('SANDBOX_UNAVAILABLE',
-      `无法解析沙箱策略：${error instanceof Error ? error.message : String(error)}`)
-  }
-  const declared = plan.sandbox
-  const session = policy.mode ?? 'workspace-write'
-  const effective = stricter(declared, session)
+  // 8 — sandbox tier and confinement (resolved in step 4b)
   const tiers = { declared, session, effective, autoEnvKeys: autoKeys }
 
   if (options.spawn === false) {
@@ -288,18 +330,8 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
   let denialSignatures
   let runnerFailureRules
 
-  // The only real bash on Windows is MSYS2/Cygwin, and its runtime cannot start
-  // under the write-restricted token: it fails creating its signal pipe or
-  // `\BaseNamedObjects\msys-2.0*` before argv is ever parsed, in read-only and
-  // workspace-write mode alike. Refuse up front instead of surfacing an opaque
-  // runner failure (or, worse, a WSL launcher's UTF-16 complaint).
-  const platform = options.platform ?? process.platform
-  if (platform === 'win32' && plan.mode === 'bash' && !isFullAccess(effective)) {
-    return withSandbox(failWith('BASH_SANDBOX_UNSUPPORTED',
-      'Windows 上的 bash 只能以 danger-full-access 运行：MSYS2/Cygwin 运行时在沙箱令牌下'
-      + '无法初始化（signal pipe / BaseNamedObjects 被拒）。请把该工具的 sandbox 设为 '
-      + 'danger-full-access，或改用 mode: powershell / mode: executable'), tiers)
-  }
+  // Windows bash already chose its runtime in step 5 (the staged dsh-ops payload,
+  // or danger-full-access for anything else); nothing left to refuse here.
 
   if (!isFullAccess(effective)) {
     if (!services.sandbox?.confine) {

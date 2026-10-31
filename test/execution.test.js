@@ -139,35 +139,84 @@ test('a session may only tighten the declared tier', async () => {
 })
 
 test('a Windows bash tool refuses the sandbox token instead of dying in msys2 init', async () => {
-  // Measured: every real bash on Windows is MSYS2/Cygwin, whose runtime fails
+  // Measured: every ordinary bash on Windows is MSYS2/Cygwin, whose runtime fails
   // creating its signal pipe / BaseNamedObjects under the write-restricted token
-  // in both read-only and workspace-write mode, before argv is parsed.
+  // in both read-only and workspace-write mode, before argv is parsed. The one
+  // exception is the staged dsh-ops payload, tested separately below.
   const bashTool = tool({ mode: 'bash', executable: undefined, command: 'echo "$@"' })
+  const noStaged = () => undefined
 
   const fake = services()
-  const refused = await runCustomTool(fake.services, entryOf(bashTool), { target: 'x' }, {}, { platform: 'win32' })
+  const refused = await runCustomTool(
+    fake.services, entryOf(bashTool), { target: 'x' }, {}, { platform: 'win32', findStagedBash: noStaged },
+  )
   assert.equal(refused.ok, false)
   assert.equal(refused.code, 'BASH_SANDBOX_UNSUPPORTED')
   assert.equal(fake.spawned.length, 0)
   assert.equal(validateJsonSubset(OUTPUT_SCHEMA, refused), null)
 
-  // danger-full-access is the documented way to run bash on Windows.
+  // danger-full-access is the documented way to run an ordinary bash on Windows.
   const full = services({ mode: 'danger-full-access' })
   const allowed = await runCustomTool(
     full.services,
     entryOf({ ...bashTool, sandbox: 'danger-full-access' }),
     { target: 'x' },
     {},
-    { platform: 'win32' },
+    { platform: 'win32', findStagedBash: noStaged },
   )
   assert.equal(allowed.ok, true)
   assert.equal(full.spawned.length, 1)
 
   // Other platforms keep the normal confined path.
   const posix = services()
-  const confined = await runCustomTool(posix.services, entryOf(bashTool), { target: 'x' }, {}, { platform: 'linux' })
+  const confined = await runCustomTool(
+    posix.services, entryOf(bashTool), { target: 'x' }, {}, { platform: 'linux', findStagedBash: noStaged },
+  )
   assert.equal(confined.ok, true)
   assert.deepEqual(posix.spawned[0].argv[0], '/usr/bin/sandbox-runner')
+})
+
+test('a confined Windows bash uses the staged dsh-ops runtime and its PATH', async () => {
+  const bashTool = tool({
+    mode: 'bash', executable: undefined, command: 'echo "$@"', args: [{ arg: 'target' }],
+  })
+  const staged = {
+    file: 'C:\\dsh-ops\\bash-ipc\\abc\\usr\\bin\\bash.exe',
+    directories: ['C:\\dsh-ops\\bash-ipc\\abc\\usr\\bin', 'C:\\dsh-ops\\bash-ipc\\abc\\ucrt64\\bin'],
+    root: 'C:\\dsh-ops\\bash-ipc\\abc',
+  }
+
+  const fake = services()
+  const value = await runCustomTool(
+    fake.services, entryOf(bashTool), { target: 'x' }, {},
+    { platform: 'win32', findStagedBash: () => staged },
+  )
+
+  assert.equal(value.ok, true)
+  const spawn = fake.spawned[0]
+  // The staged runtime replaces the WSL launcher. The fake confine prefixes its
+  // runner, so the staged bash is argv[1]; the rest keeps the exact shape:
+  // source, $0, then the value.
+  assert.equal(spawn.argv[1], staged.file)
+  assert.deepEqual(spawn.argv.slice(2, 5), ['-c', 'echo "$@"', 'custom-tool'])
+  assert.equal(spawn.argv[5], 'x')
+  // PATH must lead with the staged tree or every external command dies.
+  assert.ok(spawn.env.PATH.startsWith(staged.directories.join(';')), spawn.env.PATH)
+})
+
+test('an explicitly pinned Windows bash is refused rather than silently swapped', async () => {
+  const bashTool = tool({ mode: 'bash', executable: 'bash', command: 'echo "$@"' })
+  const pinned = { ...bashTool, executable: 'C:\\Software\\Git\\bin\\bash.exe' }
+
+  const fake = services()
+  const value = await runCustomTool(
+    fake.services, entryOf(pinned), { target: 'x' }, {},
+    { platform: 'win32', findStagedBash: () => ({ file: 'x', directories: [], root: 'x' }) },
+  )
+
+  assert.equal(value.ok, false)
+  assert.equal(value.code, 'BASH_SANDBOX_UNSUPPORTED')
+  assert.equal(fake.spawned.length, 0)
 })
 
 test('sandbox failure fails closed instead of running bare', async () => {

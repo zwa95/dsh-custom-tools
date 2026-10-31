@@ -41,11 +41,9 @@ interpreter: python
 script: C:/Users/me/tools/report.py
 
 # bash — a fixed script body; parameters arrive as positional "$@" values.
-# On Windows this needs danger-full-access (see below).
 mode: bash
 command: 'printf "%s\n" "$@"'
 args: [{ arg: 'value' }]
-sandbox: danger-full-access
 
 # powershell — a fixed script body; parameters arrive as JSON on stdin.
 # -Command does not bind trailing tokens to $args, so argv is not an option.
@@ -66,22 +64,37 @@ command: 'printf "%s\n" "$@"'
 sandbox: danger-full-access
 ```
 
-**bash on Windows needs `sandbox: danger-full-access`.** Every real bash on
+**Confined bash on Windows runs one specific runtime.** An ordinary bash on
 Windows is an MSYS2/Cygwin build, and that POSIX runtime cannot initialise inside
 the Windows write-restricted token: it dies creating its signal pipe or
 `\BaseNamedObjects\msys-2.0*` before it ever parses argv — in `read-only` and
 `workspace-write` mode alike. This is not a `bash`-specific quirk: `ls.exe` from
 the same installation fails identically, while the mingw-native `git.exe` runs
-fine. So rather than report an opaque runner failure, the plugin refuses the call
-up front with `BASH_SANDBOX_UNSUPPORTED` and tells the model to switch to
-`powershell`/`executable` or to widen the tier. On macOS and Linux `bash` runs
-confined as usual.
+fine.
+
+The exception is the payload `dsh-ops` ships: a pinned MSYS build plus two IPC
+compatibility proxies, staged under
+`%USERPROFILE%\.dsh\dsh-ops\bash-ipc\<identity>\`. That one starts inside the
+restricted token, and confinement still holds (verified with real writes: the
+workspace and the runner's temp are writable, everything outside is denied). So
+when a `mode: bash` tool leaves `executable` unset and the call will be confined,
+the plugin runs that staged bash — with the staged directories leading `PATH`,
+because an inherited `PATH` resolves external commands to a different, unpinned
+tree that dies the same way.
+
+- If the staged payload is missing, the call fails with `BASH_SANDBOX_UNSUPPORTED`
+  telling the model to widen the tier or switch to `powershell`/`executable`.
+- An explicitly pinned `executable` always wins: it is never silently swapped for
+  the staged bash, and pinning an ordinary bash in a confined tier fails the same
+  way. Pin + `sandbox: danger-full-access`, or leave `executable` empty.
+- On macOS and Linux `bash` runs confined as usual.
 
 Also worth knowing: `bash` on `PATH` is usually `C:\Windows\System32\bash.exe`,
 the WSL launcher, which answers with a UTF-16LE `Bash/E_ACCESSDENIED` instead of
-running anything. When a `mode: bash` tool leaves `executable` unset and `bash`
-resolves to that launcher or to the Microsoft Store alias, the plugin looks for a
-real bash in this order, derived only from the deployment environment:
+running anything. In a `danger-full-access` tier, when a `mode: bash` tool leaves
+`executable` unset and `bash` resolves to that launcher or to the Microsoft Store
+alias, the plugin looks for a real bash in this order, derived only from the
+deployment environment:
 
 1. `<git>/bin/bash.exe` next to the `git` on `PATH`, then `<git>/usr/bin/bash.exe`
 2. `%ProgramFiles%\Git`, `%ProgramW6432%\Git`, `%ProgramFiles(x86)%\Git`
