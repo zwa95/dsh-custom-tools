@@ -158,22 +158,33 @@
   .pill:hover { border-color: var(--text-3); color: var(--text-1); }
   .pill.on { background: rgba(76,141,255,.16); border-color: var(--brand); color: #cfe0ff; }
 
-  .opts { display: grid; gap: 2px; margin: 2px 0 4px; }
+  .opts { display: grid; gap: 4px; margin: 4px 0 6px; }
   .opt {
     display: grid;
-    grid-template-columns: 16px minmax(150px, max-content) 1fr;
-    align-items: baseline;
+    grid-template-columns: 16px 1fr;
+    align-items: start;
     gap: 8px;
-    padding: 3px 6px;
-    border-radius: 5px;
+    padding: 5px 7px;
+    border: 1px solid transparent;
+    border-radius: 6px;
     cursor: pointer;
     font-size: 12px;
-    color: var(--text-2);
+    background: rgba(255,255,255,.018);
   }
-  .opt:hover { background: rgba(255,255,255,.03); }
-  .opt input { margin: 0; cursor: pointer; }
+  .opt:hover { border-color: var(--border-l2); background: rgba(255,255,255,.035); }
+  .opt.on { background: rgba(76,141,255,.10); border-color: rgba(76,141,255,.35); }
+  .opt input { margin: 3px 0 0; cursor: pointer; }
   .opt .opt-label { color: var(--text-1); }
-  .opt .opt-eg { color: var(--text-3); font-family: var(--mono); font-size: 11px; }
+  .opt .opt-eg { display: block; color: var(--text-3); font-size: 11px; margin-top: 2px; }
+  .opt .opt-eg code {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-2);
+    background: rgba(255,255,255,.06);
+    padding: 0 4px;
+    border-radius: 3px;
+  }
+  .opts .opts-title { font-size: 11px; color: var(--text-3); margin: 2px 0 0 2px; }
   .cb { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-2); cursor: pointer; }
   .cb input { accent-color: var(--brand); }
 
@@ -696,36 +707,40 @@ function variableBody(piece) {
 
   // 拼进 argv 还是写进 stdin 由模式决定，不让作者逐个变量选。
   if (state.mode !== 'powershell') {
+    const title = el('div', 'opts-title')
+    title.textContent = '这个参数在命令行里长什么样'
+    body.appendChild(title)
+
     const opts = el('div', 'opts')
     if (piece.type === 'array') {
       opts.appendChild(optionRow(
-        '数组拆成多个 argv',
-        '<tags> 收到 [a,b] → a、b 各占一格（有前缀时每格都带前缀）',
+        '一个值占一格，有几个值就占几格',
+        '传 `[a,b]` 得到两格：`a` `b`（带前缀时每格都带）',
         piece.repeat,
         (on) => { piece.repeat = on; if (on) piece.join = ''; renderAll() },
       ))
       opts.appendChild(optionRow(
-        '数组拼成一个 argv',
-        '<tags> 收到 [a,b] → a,b 一个元素；分隔符在下面填',
+        '所有值挤成一格',
+        '传 `[a,b]` 得到一格：`a,b`（分隔符在下面填）',
         piece.join !== '' && piece.join !== undefined && piece.join !== null,
         (on) => { if (on) { piece.join = piece.join || ','; piece.repeat = false } else { piece.join = '' } renderAll() },
       ))
     }
     opts.appendChild(optionRow(
-      '值写成 JSON',
-      '[1,2] → [1,2] 一个元素，而不是 1、2 两格',
+      '原样输出成 JSON 文本',
+      '`[1,2]` 变成一格 `[1,2]`，不会拆成 1 和 2',
       piece.json,
       (on) => { piece.json = on; renderPreview() },
     ))
     opts.appendChild(optionRow(
-      '空值就不传',
-      '模型没给值 → 这一格整个消失，不留空串',
+      '没给值就整格不要',
+      '模型不传这个参数时不出现空串，而不是留一格空的',
       piece.omitIfEmpty,
       (on) => { piece.omitIfEmpty = on; renderPreview() },
     ))
     opts.appendChild(optionRow(
-      '允许值以 - 开头',
-      '默认拒绝 --foo 这类值，防止被当成选项',
+      '允许值以横杠开头',
+      '默认拦掉 `--help` 这类值，避免被当成程序的选项',
       piece.allowLeadingDash,
       (on) => { piece.allowLeadingDash = on; renderPreview() },
     ))
@@ -928,18 +943,21 @@ function pill(label, on, onChange) {
   return button
 }
 
-function optionRow(label, example, on, onChange) {
+function optionRow(label, explanation, on, onChange) {
   const row = document.createElement('label')
-  row.className = 'opt'
+  row.className = on ? 'opt on' : 'opt'
   const box = document.createElement('input')
   box.type = 'checkbox'
   box.checked = Boolean(on)
   box.addEventListener('change', () => onChange(box.checked))
+  const text = el('span')
   const name = el('span', 'opt-label')
   name.textContent = label
   const eg = el('span', 'opt-eg')
-  eg.textContent = example
-  row.append(box, name, eg)
+  // explanation 里用 `code` 包住的部分按等宽字体渲染
+  eg.innerHTML = String(explanation).replace(/`([^`]+)`/g, (_, code) => `<code>${escapeHtml(code)}</code>`)
+  text.append(name, eg)
+  row.append(box, text)
   return row
 }
 
