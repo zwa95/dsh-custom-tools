@@ -112,7 +112,7 @@
   .chip .nm { font-weight: 700; opacity: .9; }
   .chip .nm::after { content: '='; opacity: .55; margin: 0 1px; }
   .chip .nm.nm-flag::after { content: '92'; }
-  .chip.ghost { border-style: dashed; opacity: .5; }
+  .chip.ghost { border-style: dashed; opacity: .62; }
   .chip.ghost i { font-style: normal; }
   .chip.ghost s { margin-left: 6px; font-size: 10px; opacity: .8; }
   .chip s { margin-left: 6px; font-size: 10px; opacity: .7; text-decoration: none; }
@@ -220,13 +220,13 @@
     <span><i style="background:#9ece6a"></i>变量</span>
     <span><i style="background:#bb9af7"></i>开关</span>
     <span><i style="background:#e0af68"></i>stdin</span>
-    <span style="color:var(--text-3)">虚线 = 当前不会出现在 argv 里</span>
+    <span style="color:var(--text-3)">虚线框 = 可能没有</span>
   </div>
 
   <div class="prev" id="preview"></div>
   <div class="hint" style="margin-top:8px;color:var(--text-3);font-size:11px">
     每个块是宿主真正 spawn 的一个 argv 元素（逐元素，不拼 shell）。绿色块是变量的位置，只写变量名 ——
-    值要到模型调用时才有；开关即使关着也画出来，虚线表示它现在不产生元素。
+    值要到模型调用时才有；开关即使关着也画出来，虚线框表示这一格可能有、也可能没有。
   </div>
 </div>
 
@@ -499,8 +499,10 @@ function chipFor(item) {
     ? `<b class="nm nm-flag">${escapeHtml(item.name)}</b>`
     : ''
 
+  // A switch that is off still occupies its place in the structure; the dashed
+  // frame says "may or may not be here", without pretending it is deleted.
   if (item.kind === 'flag' && item.active === false) {
-    return `<span class="chip ${chipClass} ghost">${name}<i>${escapeHtml(item.text)}</i><s>未启用</s></span>`
+    return `<span class="chip ${chipClass} ghost">${name}<i>${escapeHtml(item.text)}</i></span>`
   }
   const notes = (item.notes ?? []).length > 0
     ? `<s>${escapeHtml(item.notes.join(' · '))}</s>`
