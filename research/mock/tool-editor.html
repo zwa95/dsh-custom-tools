@@ -413,7 +413,7 @@ function stdinPiece() {
 // ------------------------------------------------------------------ 预览
 /** 变量在预览里只占一个「名字槽」：值要到模型调用时才有。 */
 function slotText(piece) {
-  return piece.prefix + '{' + (piece.name || '未命名') + '}' + piece.suffix
+  return piece.prefix + '<' + (piece.name || '未命名') + '>' + piece.suffix
 }
 
 function isBlank(value) {
