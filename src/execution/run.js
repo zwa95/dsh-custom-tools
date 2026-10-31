@@ -14,7 +14,7 @@ import { isAbsolute, resolve as resolvePath } from 'node:path'
 
 import { buildInvocation } from '../compiler/bindings.js'
 import { normalizeArguments } from '../compiler/parameters.js'
-import { failure, success } from '../result/contract.js'
+import { emptySandbox, failure, success } from '../result/contract.js'
 import { hintFor, classifyExit } from './classify.js'
 import { stricter, isFullAccess, confinementPolicy } from './sandbox.js'
 import { encodingDefaultsFor, interpreterKey, mergeEncodingEnv, withArgvPrefix } from './encoding.js'
@@ -53,7 +53,7 @@ function isFile(path) {
 }
 
 function withSandbox(result, tiers) {
-  return { ...result, sandbox: tiers }
+  return { ...result, sandbox: { ...emptySandbox(), ...tiers } }
 }
 
 /**
@@ -234,6 +234,10 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
 
   let finalArgv = argv
   let enforcement
+  // Classification inputs stay local: they are sandbox implementation detail,
+  // not part of the published result contract.
+  let denialSignatures
+  let runnerFailureRules
   if (!isFullAccess(effective)) {
     if (!services.sandbox?.confine) {
       return withSandbox(failWith('SANDBOX_UNAVAILABLE',
@@ -245,8 +249,8 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
       )
       finalArgv = confined.argv
       enforcement = confined.enforcement
-      tiers.denialSignatures = confined.denialSignatures
-      tiers.runnerFailureRules = confined.runnerFailureRules
+      denialSignatures = confined.denialSignatures
+      runnerFailureRules = confined.runnerFailureRules
     } catch (error) {
       return withSandbox(failWith('SANDBOX_UNAVAILABLE',
         `沙箱无法启动：${error instanceof Error ? error.message : String(error)}`), tiers)
@@ -327,8 +331,8 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
     sandbox: {
       originalArgv0: argv[0],
       confinedArgv0: finalArgv[0],
-      denialSignatures: tiers.denialSignatures,
-      runnerFailureRules: tiers.runnerFailureRules,
+      denialSignatures,
+      runnerFailureRules,
     },
   })
 

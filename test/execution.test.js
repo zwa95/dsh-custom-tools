@@ -5,6 +5,9 @@ import { compile } from '../src/compiler/compile.js'
 import { runCustomTool } from '../src/execution/run.js'
 import { renderResult } from '../src/result/render.js'
 
+import { validateJsonSubset } from '../src/execution/jsonschema.js'
+import { OUTPUT_SCHEMA } from '../src/result/contract.js'
+
 function tool(overrides = {}) {
   return {
     name: 'demo',
@@ -97,6 +100,21 @@ test('success returns stdout verbatim and passes exact argv through the sandbox'
   assert.deepEqual(fake.spawned[0].argv, ['/usr/bin/sandbox-runner', '/usr/bin/demo', 'run', 'a b'])
   assert.equal(fake.spawned[0].cwd, process.cwd())
   assert.equal(renderResult(value, { parse: 'text' }), 'hello\n')
+})
+
+test('every result satisfies the declared output schema', async () => {
+  const ok = await runCustomTool(services().services, entryOf(tool()), { target: 'a b' }, {})
+  assert.equal(validateJsonSubset(OUTPUT_SCHEMA, ok), null)
+
+  const failed = await runCustomTool(services({ confineFails: true }).services, entryOf(tool()), { target: 'x' }, {})
+  assert.equal(failed.ok, false)
+  assert.equal(validateJsonSubset(OUTPUT_SCHEMA, failed), null)
+
+  // Missing arguments bail out before any sandbox tier exists: the result must
+  // still carry the whole block, or the host rejects it as an extra key.
+  const early = await runCustomTool(services().services, entryOf(tool()), {}, {})
+  assert.equal(early.code, 'INVALID_ARGUMENT')
+  assert.equal(validateJsonSubset(OUTPUT_SCHEMA, early), null)
 })
 
 test('full access skips confinement entirely', async () => {
