@@ -44,9 +44,9 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.5",
-    "@deepseek-ai/dsh-tools": "^0.2.1-rc.1",
-    "@deepseek-ai/schemastery": "~3.18.5"
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.3",
+    "@deepseek-ai/schemastery": "3.18.5"
   },
   "dsh": {
     "manifestVersion": 1,

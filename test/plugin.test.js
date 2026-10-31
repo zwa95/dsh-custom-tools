@@ -105,6 +105,20 @@ test('the plugin declares its identity and its one hard dependency', () => {
   assert.deepEqual(inject, ['tools'])
 })
 
+// Cordis validates whatever `apply()` returns as an effect. Returning a plain
+// object makes the fiber fail with "Invalid effect", and the rollback disposes
+// every tool the plugin just registered — the tools silently vanish.
+test('apply returns nothing so Cordis does not treat it as an effect', async () => {
+  const fake = fakeContext()
+  const config = { tools: ref([TOOL]), deferLoading: ref(false) }
+
+  const returned = apply(fake.ctx, config)
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(returned, undefined)
+  assert.ok(fake.tools.has('demo_tool'))
+})
+
 test('mounting registers the declared tools and the slash command', async () => {
   const fake = fakeContext()
   const config = { tools: ref([TOOL]), deferLoading: ref(false) }

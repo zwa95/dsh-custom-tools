@@ -140,7 +140,9 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
   // 5 — executable / interpreter / script
   const lookupEnv = { ...(plan.env ?? {}) }
   const resolveExecutable = async (name, code) => {
-    if (!services.subprocess?.resolveExecutable) return { error: code }
+    // A deployment without the subprocess service cannot run anything at all:
+    // that is a plugin/deployment fault, not a missing executable.
+    if (!services.subprocess?.resolveExecutable) return { error: 'CUSTOM_TOOL_INTERNAL', detail: 'subprocess 服务不可用' }
     try {
       return { path: await services.subprocess.resolveExecutable(name, lookupEnv, exec.signal) }
     } catch (error) {
@@ -156,10 +158,13 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
   const targetName = plan.mode === 'script' ? plan.interpreter : plan.executable
   const resolvedTarget = await resolveExecutable(targetName, 'EXECUTABLE_NOT_FOUND')
   if (resolvedTarget.error) {
-    return failWith(resolvedTarget.error,
-      resolvedTarget.error === 'EXECUTABLE_NOT_FOUND'
-        ? `找不到可执行文件 ${targetName}`
-        : `解析可执行文件失败：${resolvedTarget.detail ?? ''}`)
+    if (resolvedTarget.error === 'EXECUTABLE_NOT_FOUND') {
+      return failWith('EXECUTABLE_NOT_FOUND', `找不到可执行文件 ${targetName}`)
+    }
+    if (resolvedTarget.error === 'CUSTOM_TOOL_INTERNAL') {
+      return failWith('CUSTOM_TOOL_INTERNAL', resolvedTarget.detail ?? 'subprocess 服务不可用')
+    }
+    return failWith(resolvedTarget.error, `解析可执行文件失败：${resolvedTarget.detail ?? ''}`)
   }
   if (plan.mode === 'script') resolved.interpreter = resolvedTarget.path
   else resolved.executable = resolvedTarget.path

@@ -149,6 +149,16 @@ test('missing executable is reported before anything is spawned', async () => {
   assert.equal(fake.spawned.length, 0)
 })
 
+test('a deployment without the subprocess service is a plugin fault, not a missing binary', async () => {
+  const fake = services()
+  const bare = { ...fake.services, subprocess: undefined }
+  const value = await runCustomTool(bare, entryOf(tool()), { target: 'x' }, {})
+
+  assert.equal(value.code, 'CUSTOM_TOOL_INTERNAL')
+  assert.match(value.message, /subprocess/)
+  assert.equal(fake.spawned.length, 0)
+})
+
 test('credentials are resolved per call and never echoed', async () => {
   const fake = services()
   const entry = entryOf(tool({ credentials: [{ env: 'DEMO_TOKEN', ref: 'demo' }] }))

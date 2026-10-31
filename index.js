@@ -84,17 +84,31 @@ export function apply(ctx, config) {
 
   const manager = new Manager({ registry, services, defineTool, outputSchema: OUTPUT_SCHEMA })
 
+  // `logger` is a guarded service in Cordis: reading it without declaring the
+  // dependency throws, which would turn a merely noisy config into a failing
+  // fiber. Fall back to the console instead of taking the plugin down.
+  const warn = (message) => {
+    try {
+      const logger = ctx.logger
+      if (typeof logger?.warn === 'function') {
+        logger.warn(message)
+        return
+      }
+    } catch {}
+    console.warn(message)
+  }
+
   const report = (outcome) => {
     if (!outcome || outcome.changed !== true) return
     const failed = outcome.issues.filter((issue) => issue.severity === 'error')
     if (failed.length > 0) {
-      ctx.logger?.warn?.(`custom-tools: ${failed.length} issue(s): ${failed.map((i) => i.code).join(', ')}`)
+      warn(`custom-tools: ${failed.length} issue(s): ${failed.map((i) => i.code).join(', ')}`)
     }
   }
 
   const refresh = () => {
     manager.apply(snapshotOf(config)).then(report, (error) => {
-      ctx.logger?.warn?.(`custom-tools: apply failed: ${error instanceof Error ? error.message : String(error)}`)
+      warn(`custom-tools: apply failed: ${error instanceof Error ? error.message : String(error)}`)
     })
   }
 
@@ -106,6 +120,4 @@ export function apply(ctx, config) {
   ctx.effect(() => () => manager.dispose(), 'custom-tools: tools')
 
   registerCommands(ctx, { manager, namespace: name })
-
-  return manager
 }
