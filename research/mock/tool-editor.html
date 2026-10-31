@@ -450,7 +450,10 @@ function variableChips(piece) {
   if (piece.join) notes.push('以 ' + piece.join + ' 连接')
   if (piece.json) notes.push('JSON')
   if (piece.omitIfEmpty) notes.push('空值省略')
-  return [{ kind: 'var', name: piece.name, text, notes }]
+  const chips = [{ kind: 'var', name: piece.name, text, notes }]
+  // 逐项展开时，一个变量会变出 N 个元素：再画一个虚位，别让人以为只有一个。
+  if (piece.repeat) chips.push({ kind: 'var', name: piece.name, text, notes: [], absent: true })
+  return chips
 }
 
 function buildPreview() {
@@ -524,6 +527,9 @@ function chipFor(item) {
 
   // A switch that is off still occupies its place in the structure; the dashed
   // frame says "may or may not be here", without pretending it is deleted.
+  if (item.absent === true) {
+    return `<span class="chip ${chipClass} ghost">${name}${escapeHtml(item.text)}</span>`
+  }
   if (item.kind === 'flag' && item.active === false) {
     return `<span class="chip ${chipClass} ghost">${name}<i>${escapeHtml(item.text)}</i></span>`
   }
