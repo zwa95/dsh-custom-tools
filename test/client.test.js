@@ -126,3 +126,17 @@ test('the section reads remote settings through the soft get path', () => {
   assert.match(source, /ctx\.get\('remote\.settings'\)/u)
   assert.match(source, /'slots', 'remote', 'remote\.settings'/u)
 })
+
+test('a card key never embeds the tool name, so typing cannot remount the field', () => {
+  // Regression: keying ToolCard by `${index}:${tool.name}` remounted the whole
+  // card on every keystroke, so the name input lost focus after one character.
+  assert.match(source, /key: rowIds\.current\[index\]/u)
+  assert.doesNotMatch(source, /key: `\$\{index\}:\$\{asString\(tool\.name\)\}`/u)
+})
+
+test('the JSON textareas survive parent re-renders', () => {
+  // Regression: JsonField compared `value` by identity, and the page rebuilds
+  // `advanced` on every render, so each keystroke reset the textarea content.
+  assert.match(source, /const serialized = \(input\) => JSON\.stringify\(input \?\? null\)/u)
+  assert.match(source, /if \(incoming !== adopted\.current\)/u)
+})

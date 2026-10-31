@@ -240,11 +240,16 @@ window.__ModuleLoader__.load({
      */
     function JsonField({ label, value, onChange, disabled, rows, hint }) {
       const format = (input) => JSON.stringify(input ?? null, null, 2)
+      const serialized = (input) => JSON.stringify(input ?? null)
       const [text, setText] = React.useState(() => format(value))
       const [problem, setProblem] = React.useState('')
-      const adopted = React.useRef(value)
-      if (value !== adopted.current) {
-        adopted.current = value
+      // Compare by serialized content, not object identity: the parent rebuilds
+      // these objects on every render, and resetting the textarea whenever the
+      // identity changed would wipe what the user is typing after each keystroke.
+      const adopted = React.useRef(serialized(value))
+      const incoming = serialized(value)
+      if (incoming !== adopted.current) {
+        adopted.current = incoming
         setText(format(value))
         setProblem('')
       }
@@ -253,12 +258,15 @@ window.__ModuleLoader__.load({
         setText(next)
         if (next.trim() === '') {
           setProblem('')
+          adopted.current = serialized(null)
           onChange(null)
           return
         }
         try {
-          onChange(JSON.parse(next))
+          const parsed = JSON.parse(next)
+          adopted.current = serialized(parsed)
           setProblem('')
+          onChange(parsed)
         } catch (error) {
           setProblem(error instanceof Error ? error.message : String(error))
         }
@@ -274,9 +282,14 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------------------------------ cards
 
-    function ToolCard({ tool, index, total, disabled, onChange, onRemove, onMove }) {
+    function ToolCard({ tool, index, total, disabled, savedAt, onChange, onRemove, onMove }) {
       const set = (patch) => onChange(index, { ...tool, ...patch })
       const mode = asString(tool.mode, 'executable')
+      // The headline shows the *persisted* name: a draft name only reaches the
+      // card header after a successful save, so typing never rewrites it.
+      const committed = React.useRef(asString(tool.name))
+      React.useEffect(() => { committed.current = asString(tool.name) }, [savedAt])
+      const draftName = asString(tool.name)
 
       const targetField = mode === 'executable'
         ? h(Field, { label: '可执行文件', hint: '填 PATH 名（如 git）或绝对路径' },
@@ -323,7 +336,10 @@ window.__ModuleLoader__.load({
 
       return h('div', { style: styles.card },
         h('div', { style: styles.cardHead },
-          h('strong', { style: { fontSize: 13 } }, asString(tool.name, '(未命名)')),
+          h('strong', { style: { fontSize: 13 } }, committed.current || '(未命名)'),
+          draftName !== committed.current
+            ? h('span', { style: { fontSize: 11, opacity: 0.7 } }, '未保存')
+            : null,
           h('span', { style: styles.status }, mode),
           tool.enabled === false ? h('span', { style: styles.error }, '已禁用') : null,
           h('span', { style: { flex: 1 } }),
@@ -455,6 +471,13 @@ window.__ModuleLoader__.load({
         const [draft, setDraft] = React.useState(null)
         const [revision, setRevision] = React.useState(undefined)
         const [busy, setBusy] = React.useState(false)
+        // `savedAt` bumps on every successful load/save: cards use it to know
+        // when the persisted name changed and the headline may be redrawn.
+        const [savedAt, setSavedAt] = React.useState(0)
+        // Row identity for React keys. Keying a card by its *name* remounts the
+        // whole card on every keystroke, which steals focus from the name input.
+        const rowIds = React.useRef([])
+        const nextRowId = React.useRef(1)
 
         async function load() {
           setPhase('loading')
@@ -478,8 +501,11 @@ window.__ModuleLoader__.load({
               setProblem(`设置文档里没有命名空间 ${NS}：插件可能未启用，或加载失败。`)
               return
             }
-            setDraft(readValue(view.value))
+            const value = readValue(view.value)
+            rowIds.current = value.tools.map(() => nextRowId.current++)
+            setDraft(value)
             setRevision(view.revision)
+            setSavedAt((count) => count + 1)
             setPhase('ready')
           } catch (error) {
             setPhase('error')
@@ -496,6 +522,7 @@ window.__ModuleLoader__.load({
           edit({ ...current, tools: current.tools.map((tool, i) => (i === index ? next : tool)) })
         }
         const removeTool = (index) => {
+          rowIds.current = rowIds.current.filter((_, i) => i !== index)
           edit({ ...current, tools: current.tools.filter((_, i) => i !== index) })
         }
         const moveTool = (index, delta) => {
@@ -504,9 +531,14 @@ window.__ModuleLoader__.load({
           if (target < 0 || target >= tools.length) return
           const [item] = tools.splice(index, 1)
           tools.splice(target, 0, item)
+          const ids = [...rowIds.current]
+          const [movedId] = ids.splice(index, 1)
+          ids.splice(target, 0, movedId)
+          rowIds.current = ids
           edit({ ...current, tools })
         }
         const addTool = (kind) => {
+          rowIds.current = [...rowIds.current, nextRowId.current++]
           edit({ ...current, tools: [...current.tools, JSON.parse(JSON.stringify(TEMPLATES[kind]))] })
         }
 
@@ -526,8 +558,7 @@ window.__ModuleLoader__.load({
             } else {
               setMessage('已保存。下一次工具调用就会用新定义；正在运行的调用会跑完它启动时的那一版。')
               await load()
-            }
-          } catch (error) {
+            }          } catch (error) {
             setMessage(`保存失败：${error instanceof Error ? error.message : String(error)}`)
           } finally {
             setBusy(false)
@@ -567,11 +598,12 @@ window.__ModuleLoader__.load({
           }
 
           body.push(...current.tools.map((tool, index) => h(ToolCard, {
-            key: `${index}:${asString(tool.name)}`,
+            key: rowIds.current[index] ?? `row-${index}`,
             tool,
             index,
             total: current.tools.length,
             disabled: busy,
+            savedAt,
             onChange: setTool,
             onRemove: removeTool,
             onMove: moveTool,
