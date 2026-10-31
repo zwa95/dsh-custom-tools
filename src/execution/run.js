@@ -287,6 +287,20 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
   // not part of the published result contract.
   let denialSignatures
   let runnerFailureRules
+
+  // The only real bash on Windows is MSYS2/Cygwin, and its runtime cannot start
+  // under the write-restricted token: it fails creating its signal pipe or
+  // `\BaseNamedObjects\msys-2.0*` before argv is ever parsed, in read-only and
+  // workspace-write mode alike. Refuse up front instead of surfacing an opaque
+  // runner failure (or, worse, a WSL launcher's UTF-16 complaint).
+  const platform = options.platform ?? process.platform
+  if (platform === 'win32' && plan.mode === 'bash' && !isFullAccess(effective)) {
+    return withSandbox(failWith('BASH_SANDBOX_UNSUPPORTED',
+      'Windows 上的 bash 只能以 danger-full-access 运行：MSYS2/Cygwin 运行时在沙箱令牌下'
+      + '无法初始化（signal pipe / BaseNamedObjects 被拒）。请把该工具的 sandbox 设为 '
+      + 'danger-full-access，或改用 mode: powershell / mode: executable'), tiers)
+  }
+
   if (!isFullAccess(effective)) {
     if (!services.sandbox?.confine) {
       return withSandbox(failWith('SANDBOX_UNAVAILABLE',

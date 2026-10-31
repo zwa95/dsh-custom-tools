@@ -40,16 +40,18 @@ mode: script
 interpreter: python
 script: C:/Users/me/tools/report.py
 
-# bash — a fixed script body; parameters arrive as positional $1, $2 …
+# bash — a fixed script body; parameters arrive as positional "$@" values.
+# On Windows this needs danger-full-access (see below).
 mode: bash
 command: 'printf "%s\n" "$@"'
 args: [{ arg: 'value' }]
+sandbox: danger-full-access
 
-# powershell — a fixed script body; parameters arrive as positional $args,
-# or as JSON on stdin with { stdin: 'json' }.
+# powershell — a fixed script body; parameters arrive as JSON on stdin.
+# -Command does not bind trailing tokens to $args, so argv is not an option.
 mode: powershell
-command: 'Write-Output $args[0]'
-args: [{ arg: 'value' }]
+command: '$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json; Write-Output $payload.value'
+args: [{ stdin: 'json' }]
 ```
 
 ## Shell binaries on Windows
@@ -61,14 +63,25 @@ args: [{ arg: 'value' }]
 mode: bash
 executable: C:/Program Files/Git/bin/bash.exe
 command: 'printf "%s\n" "$@"'
+sandbox: danger-full-access
 ```
 
-That matters on Windows, where `bash` on `PATH` is usually
-`C:\Windows\System32\bash.exe` — the WSL launcher. It resolves, then cannot start
-inside a confined run and dies with an opaque `E_ACCESSDENIED`. So when a
-`mode: bash` tool leaves `executable` unset and `bash` resolves to that launcher
-or to the Microsoft Store alias, the plugin looks for a real bash in this order,
-derived only from the deployment environment:
+**bash on Windows needs `sandbox: danger-full-access`.** Every real bash on
+Windows is an MSYS2/Cygwin build, and that POSIX runtime cannot initialise inside
+the Windows write-restricted token: it dies creating its signal pipe or
+`\BaseNamedObjects\msys-2.0*` before it ever parses argv — in `read-only` and
+`workspace-write` mode alike. This is not a `bash`-specific quirk: `ls.exe` from
+the same installation fails identically, while the mingw-native `git.exe` runs
+fine. So rather than report an opaque runner failure, the plugin refuses the call
+up front with `BASH_SANDBOX_UNSUPPORTED` and tells the model to switch to
+`powershell`/`executable` or to widen the tier. On macOS and Linux `bash` runs
+confined as usual.
+
+Also worth knowing: `bash` on `PATH` is usually `C:\Windows\System32\bash.exe`,
+the WSL launcher, which answers with a UTF-16LE `Bash/E_ACCESSDENIED` instead of
+running anything. When a `mode: bash` tool leaves `executable` unset and `bash`
+resolves to that launcher or to the Microsoft Store alias, the plugin looks for a
+real bash in this order, derived only from the deployment environment:
 
 1. `<git>/bin/bash.exe` next to the `git` on `PATH`, then `<git>/usr/bin/bash.exe`
 2. `%ProgramFiles%\Git`, `%ProgramW6432%\Git`, `%ProgramFiles(x86)%\Git`
@@ -81,8 +94,12 @@ bash is missing. A model argument never influences this choice, and an explicit
 `executable` always wins.
 
 `mode: powershell` defaults to `pwsh` and falls back to `powershell.exe`
-(Windows PowerShell 5.1) when PowerShell 7 is not installed. `/custom-tools
-preview <name> --param k=v` prints the absolute path that will actually run.
+(Windows PowerShell 5.1) when PowerShell 7 is not installed. Parameters always
+travel as one JSON document on stdin (`{ stdin: 'json' }`), never as trailing
+argv: `powershell -Command <source> a b` appends `a`/`b` to the command text
+instead of binding them to `$args` (measured, and the reason validation rejects
+positional bindings in this mode). `/custom-tools preview <name> --param k=v`
+prints the absolute path that will actually run.
 
 ## Parameters and argv
 
@@ -131,7 +148,7 @@ argv the model's arguments would produce.
 `INVALID_CONFIG`, `INVALID_ARGUMENT`, `TOOL_RELOADING`, `CREDENTIAL_UNAVAILABLE`,
 `APPROVAL_REJECTED`, `APPROVAL_UNAVAILABLE`, `CWD_UNAVAILABLE`, `SCRIPT_UNAVAILABLE`,
 `EXECUTABLE_NOT_FOUND`, `SPAWN_FAILED`, `SANDBOX_UNAVAILABLE`, `ABORTED`, `TIMED_OUT`,
-`SANDBOX_DENIED`, `PROCESS_EXIT`, `PROCESS_SIGNALED`, `OUTPUT_LIMIT`, `INVALID_JSON_OUTPUT`,
+`SANDBOX_DENIED`, `BASH_SANDBOX_UNSUPPORTED`, `PROCESS_EXIT`, `PROCESS_SIGNALED`, `OUTPUT_LIMIT`, `INVALID_JSON_OUTPUT`,
 `OUTPUT_SCHEMA_MISMATCH`, `CUSTOM_TOOL_INTERNAL`.
 
 Text is UTF-8 in both directions; Python and Java get their usual encoding defaults injected

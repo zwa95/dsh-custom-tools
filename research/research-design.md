@@ -659,9 +659,14 @@ Node:  [node,  scriptPath, ...mappedArgs]
 [pwsh, -NoLogo, -NoProfile, -NonInteractive, -Command, PREAMBLE + fixedCommand]
 ```
 参数走 **stdin JSON**（`[Console]::In.ReadToEnd()`）；复杂参数化请用 `.ps1 -File`。
+**实测（Windows PowerShell 5.1）**：`powershell -Command 'Write-Output $args.Count' one two` 打印 `0`，
+然后 `one`/`two` 各自被当成独立语句求值——尾部 token 并不绑定 `$args`，而是拼进命令文本。
+因此 **powershell 模式禁止位置传参**：校验期报 `POWERSHELL_ARGV_UNSUPPORTED`，
+声明了 parameters 却没有 stdin 绑定则报 `POWERSHELL_STDIN_REQUIRED`。
 `PREAMBLE` 复用官方 UTF-8 preamble（`...\dsh-pwsh-local\lib\index.js:87-104`）。
 
-**Windows 边界（已定）**：`pwsh` 7 优先；`.exe/.com` 走 executable；`.bat/.cmd` **排除**（`cmd.exe` 二次解析无法结构性保证）；**Windows Git Bash（MSYS）是独立兼容目标**，需单独验收路径转换与信号语义。
+**Windows 边界（已定）**：`pwsh` 7 优先，缺失时回退 `powershell.exe`；`.exe/.com` 走 executable；`.bat/.cmd` **排除**（`cmd.exe` 二次解析无法结构性保证）。
+**bash 在 Windows 只能以 `danger-full-access` 运行**（实测）：PATH 上的 `bash` 通常是 `C:\Windows\System32\bash.exe`（WSL 启动器，返回 UTF-16LE 的 `Bash/E_ACCESSDENIED`）；改用真实 MSYS2/Git Bash 后，它在受限令牌下连运行时都初始化不了——`Git\bin\bash.exe` 死于 `couldn't create signal pipe, Win32 error 5`（`0xC0000142`），更新的 msys2 运行时死于 `NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0S5-<hash>): 0xC0000022`；`read-only` 与 `workspace-write` 表现相同，同目录的 `ls.exe` 同样失败，而 mingw 原生 `git.exe` 正常。因此非 full-access 下早退 `BASH_SANDBOX_UNSUPPORTED`，而不是给出模糊的 runner 失败。
 
 ### 5.3 声明式参数映射 grammar（补完 F3 三个硬墙）
 

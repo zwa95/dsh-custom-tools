@@ -138,6 +138,38 @@ test('a session may only tighten the declared tier', async () => {
   assert.deepEqual(fake.spawned[0].argv[0], '/usr/bin/sandbox-runner')
 })
 
+test('a Windows bash tool refuses the sandbox token instead of dying in msys2 init', async () => {
+  // Measured: every real bash on Windows is MSYS2/Cygwin, whose runtime fails
+  // creating its signal pipe / BaseNamedObjects under the write-restricted token
+  // in both read-only and workspace-write mode, before argv is parsed.
+  const bashTool = tool({ mode: 'bash', executable: undefined, command: 'echo "$@"' })
+
+  const fake = services()
+  const refused = await runCustomTool(fake.services, entryOf(bashTool), { target: 'x' }, {}, { platform: 'win32' })
+  assert.equal(refused.ok, false)
+  assert.equal(refused.code, 'BASH_SANDBOX_UNSUPPORTED')
+  assert.equal(fake.spawned.length, 0)
+  assert.equal(validateJsonSubset(OUTPUT_SCHEMA, refused), null)
+
+  // danger-full-access is the documented way to run bash on Windows.
+  const full = services({ mode: 'danger-full-access' })
+  const allowed = await runCustomTool(
+    full.services,
+    entryOf({ ...bashTool, sandbox: 'danger-full-access' }),
+    { target: 'x' },
+    {},
+    { platform: 'win32' },
+  )
+  assert.equal(allowed.ok, true)
+  assert.equal(full.spawned.length, 1)
+
+  // Other platforms keep the normal confined path.
+  const posix = services()
+  const confined = await runCustomTool(posix.services, entryOf(bashTool), { target: 'x' }, {}, { platform: 'linux' })
+  assert.equal(confined.ok, true)
+  assert.deepEqual(posix.spawned[0].argv[0], '/usr/bin/sandbox-runner')
+})
+
 test('sandbox failure fails closed instead of running bare', async () => {
   const fake = services({ confineFails: true })
   const value = await runCustomTool(fake.services, entryOf(tool()), { target: 'x' }, {})

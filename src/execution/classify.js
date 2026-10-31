@@ -13,6 +13,7 @@ const HINTS = {
   OUTPUT_LIMIT: '输出超过上限被丢弃。请让命令少打印（分页、加过滤参数或 --quiet），插件不会截断后继续',
   SANDBOX_UNAVAILABLE: '沙箱 runner 未能启动。检查宿主沙箱配置；非 full-access 档位下插件不会裸跑',
   SANDBOX_DENIED: '目标路径被沙箱拒绝。把 cwd 或要写的路径放进工作区，或放宽该工具的 sandbox 档位',
+  BASH_SANDBOX_UNSUPPORTED: 'Windows 上的 bash 只能在 danger-full-access 下运行（MSYS2 运行时无法在受限令牌中初始化）；改成 powershell/executable 模式，或把该工具的 sandbox 设为 danger-full-access',
   PROCESS_EXIT: '命令以非零码退出；看 stderr 判断是参数问题还是业务失败',
   PROCESS_SIGNALED: '进程被外部信号终止（任务管理器、系统 OOM 等），不是插件取消的',
   INVALID_JSON_OUTPUT: 'output.parse 声明为 json，但 stdout 不是合法 JSON；确认命令在成功时只输出 JSON',

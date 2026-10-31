@@ -171,8 +171,17 @@ export function buildInvocation(plan, values, resolved = {}) {
     // `bash -c <source> <argv0> <args...>` puts the values in "$@" only.
     argv = [executable, '-c', plan.command, 'custom-tool', ...positional]
   } else if (plan.mode === 'powershell') {
-    // Everything after -Command lands in $args; the source is never edited.
-    argv = [executable, ...plan.flags, '-Command', plan.command, ...positional]
+    // `-Command` takes the script text and nothing else: trailing tokens are
+    // appended to the command text rather than bound to `$args` (measured on
+    // Windows PowerShell 5.1, where `-Command 'Write-Output $args.Count' a b`
+    // prints 0 and then evaluates `a`). Parameters travel as stdin JSON.
+    if (positional.length > 0) {
+      return {
+        ok: false,
+        errors: ['powershell 模式不能把参数放进 argv：-Command 之后的标记会被拼进命令文本；请改用 { stdin: "json" }'],
+      }
+    }
+    argv = [executable, ...plan.flags, '-Command', plan.command]
   } else if (plan.mode === 'script') {
     argv = [interpreter, plan.script, ...positional]
   } else {

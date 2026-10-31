@@ -260,6 +260,30 @@ function validateArgs(tool, path, issues) {
   // so no extra restriction is needed here beyond the global rules above.
 }
 
+/**
+ * `powershell -Command <source>` appends trailing tokens to the command text
+ * instead of binding them to `$args`, so a positional binding would either be
+ * ignored or silently become part of the script. Parameters reach PowerShell as
+ * one JSON document on stdin.
+ */
+function validatePowershellArgs(tool, path, issues) {
+  const bindings = Array.isArray(tool.args) ? tool.args : []
+  const isStdin = (binding) => binding && (binding.stdin === 'json'
+    || (binding.stdin === 'raw' && binding.arg !== undefined))
+
+  bindings.forEach((binding, index) => {
+    if (isStdin(binding)) return
+    issues.push(fail(tool.name, `${path}.args[${index}]`, 'POWERSHELL_ARGV_UNSUPPORTED',
+      'powershell 模式下 -Command 之后的标记不会进入 $args；请改用 { stdin: "json" }'))
+  })
+
+  const hasParameters = Object.keys(tool.parameters ?? {}).length > 0
+  if (hasParameters && !bindings.some(isStdin)) {
+    issues.push(fail(tool.name, `${path}.args`, 'POWERSHELL_STDIN_REQUIRED',
+      '声明了 parameters 的 powershell 工具必须有一条 { stdin: "json" } 绑定，参数才能到达脚本'))
+  }
+}
+
 function validateMode(tool, path, issues) {
   const mode = tool.mode ?? 'executable'
   const require = (field, message) => {
@@ -289,6 +313,7 @@ function validateMode(tool, path, issues) {
     // may be pointed at a specific installation when PATH has the wrong one.
     forbid('interpreter', `${mode} 模式下请用 executable 指定 shell，interpreter 不生效`)
     forbid('script', `${mode} 模式下 script 不生效`)
+    if (mode === 'powershell') validatePowershellArgs(tool, path, issues)
   }
 
   if (tool.scriptSha256 !== undefined && tool.scriptSha256 !== ''

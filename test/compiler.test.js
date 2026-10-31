@@ -102,7 +102,7 @@ test('stdin json carries the whole normalised object', () => {
   assert.equal(built.stdin.text, '{"n":3}')
 })
 
-test('bash and powershell pass values positionally, never into the source', () => {
+test('bash passes values positionally, never into the source', () => {
   const bash = compiled(spec({
     mode: 'bash',
     executable: undefined,
@@ -113,6 +113,44 @@ test('bash and powershell pass values positionally, never into the source', () =
   const built = buildInvocation(bash.plan, { a: 'x; rm -rf /', b: 'y' }, { executable: '/usr/bin/bash' })
   assert.equal(built.ok, true)
   assert.deepEqual(built.argv, ['/usr/bin/bash', '-c', 'printf "%s\\n" "$@"', 'custom-tool', 'x; rm -rf /', 'y'])
+})
+
+test('powershell refuses argv bindings instead of appending them to the command', () => {
+  const result = compile({
+    tools: [spec({
+      mode: 'powershell',
+      executable: undefined,
+      command: 'Write-Output hi',
+      parameters: { drive: { type: 'string' } },
+      args: [{ arg: 'drive' }],
+    })],
+  })
+  const codes = result.issues.map((issue) => issue.code)
+  assert.ok(codes.includes('POWERSHELL_ARGV_UNSUPPORTED'), JSON.stringify(codes))
+  assert.equal(result.tools.get('git_status'), undefined)
+
+  // Defence in depth: even a plan that slipped through validation cannot turn a
+  // parameter into trailing `-Command` tokens.
+  const built = buildInvocation({
+    mode: 'powershell', flags: [], command: 'Write-Output hi', executable: 'pwsh',
+    args: [{ arg: 'drive' }],
+  }, { drive: 'C' })
+  assert.equal(built.ok, false)
+  assert.match(built.errors[0], /stdin/)
+})
+
+test('a powershell tool with parameters must declare a stdin binding', () => {
+  const result = validateSnapshot({
+    tools: [spec({
+      mode: 'powershell',
+      executable: undefined,
+      command: 'Write-Output hi',
+      parameters: { drive: { type: 'string' } },
+      args: [],
+    })],
+  })
+  const codes = result.issues.map((issue) => issue.code)
+  assert.ok(codes.includes('POWERSHELL_STDIN_REQUIRED'), JSON.stringify(codes))
 })
 
 test('defaults are applied, unknown arguments rejected', () => {
