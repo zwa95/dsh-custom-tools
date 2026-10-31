@@ -109,6 +109,12 @@
     white-space: pre;
   }
   .chip.empty { color: var(--text-3); border-style: dashed; border-color: var(--border-l2); }
+  .chip .nm { font-weight: 700; opacity: .9; }
+  .chip .nm::after { content: '='; opacity: .55; margin: 0 1px; }
+  .chip .nm.nm-flag::after { content: '92'; }
+  .chip.ghost { border-style: dashed; opacity: .5; }
+  .chip.ghost i { font-style: normal; }
+  .chip.ghost s { margin-left: 6px; font-size: 10px; opacity: .8; }
   .c-prog { color: #78a9ff; background: rgba(120,169,255,.12); border-color: rgba(120,169,255,.35); }
   .c-script { color: #56b6c2; background: rgba(86,182,194,.12); border-color: rgba(86,182,194,.35); }
   .c-lit { color: #b9c0d4; background: rgba(185,192,212,.10); border-color: rgba(185,192,212,.28); }
@@ -213,11 +219,13 @@
     <span><i style="background:#9ece6a"></i>变量</span>
     <span><i style="background:#bb9af7"></i>开关</span>
     <span><i style="background:#e0af68"></i>stdin</span>
+    <span style="color:var(--text-3)">虚线 = 当前不会出现在 argv 里</span>
   </div>
 
   <div class="prev" id="preview"></div>
   <div class="hint" style="margin-top:8px;color:var(--text-3);font-size:11px">
-    这是宿主真正 spawn 的东西（逐元素，不拼 shell）。绿色块取「预览值」，可以在变量的详情里改。
+    每个块是宿主真正 spawn 的一个 argv 元素（逐元素，不拼 shell）。<b>变量名显示在值前面</b>，绿色块取的是「预览值」，
+    可以在变量详情里改；开关即使关着也画出来，虚线表示它现在不产生元素。
   </div>
 </div>
 
@@ -466,7 +474,7 @@ function asText(value, piece) {
 function buildPreview() {
   const warn = []
   const argv = []
-  const stdin = {}
+  const stdin = []
 
   const program = state.mode === 'executable' ? state.executable : state.interpreter
   if (program) argv.push({ kind: 'prog', text: program })
@@ -474,10 +482,12 @@ function buildPreview() {
   if (state.mode === 'script') {
     if (state.script) argv.push({ kind: 'script', text: state.script })
   } else if (state.mode === 'bash') {
-    if (state.command) argv.push({ kind: 'script', text: '-c' })
-    if (state.command) argv.push({ kind: 'script', text: state.command })
+    if (state.command) {
+      argv.push({ kind: 'script', text: '-c' })
+      argv.push({ kind: 'script', text: state.command })
+    }
     // bash 的位置参数需要一个 $0，占位名固定
-    if (state.pieces.some((p) => p.kind === 'variable' && p.transport !== 'stdin')) {
+    if (state.pieces.some((piece) => piece.kind === 'variable' && piece.transport !== 'stdin')) {
       argv.push({ kind: 'lit', text: 'custom-tool' })
     }
   } else if (state.mode === 'powershell') {
@@ -491,13 +501,28 @@ function buildPreview() {
   for (const piece of state.pieces) {
     if (piece.kind === 'literal') {
       if (piece.text !== '') argv.push({ kind: 'lit', text: piece.text })
-    } else if (piece.kind === 'flag') {
-      if (piece.value) argv.push({ kind: 'flag', text: piece.as || (piece.name ? '--' + piece.name : '--flag') })
-    } else if (piece.kind === 'variable') {
+      continue
+    }
+    // 开关即使当前为 false 也画出来：列表结构要能一眼看全，虚线的才是「现在不会出现」。
+    if (piece.kind === 'flag') {
+      argv.push({
+        kind: 'flag',
+        name: piece.name,
+        text: piece.as || (piece.name ? '--' + piece.name : '--flag'),
+        active: piece.value === true,
+      })
+      continue
+    }
+    if (piece.kind === 'variable') {
       if (piece.transport === 'stdin') {
-        stdin[piece.name || '(未命名)'] = previewValue(piece)
+        stdin.push({ name: piece.name, value: previewValue(piece) })
+        continue
+      }
+      const parts = expandVariable(piece, warn)
+      if (parts.length === 0) {
+        argv.push({ kind: 'var', name: piece.name, text: '', omitted: true })
       } else {
-        for (const text of expandVariable(piece, warn)) argv.push({ kind: 'var', text })
+        for (const text of parts) argv.push({ kind: 'var', name: piece.name, text })
       }
     }
   }
@@ -505,23 +530,35 @@ function buildPreview() {
   return { argv, stdin, warn }
 }
 
+function chipFor(item) {
+  const chipClass = { prog: 'c-prog', script: 'c-script', lit: 'c-lit', var: 'c-var', flag: 'c-flag' }[item.kind] ?? 'c-lit'
+  const name = item.name ? `<b class="nm ${item.kind === 'flag' ? 'nm-flag' : ''}">${escapeHtml(item.name)}</b>` : ''
+
+  if (item.omitted) {
+    return `<span class="chip ${chipClass} ghost">${name}<i>空值，不传</i></span>`
+  }
+  if (item.kind === 'flag' && item.active === false) {
+    return `<span class="chip ${chipClass} ghost">${name}<i>${escapeHtml(item.text)}</i><s>未启用</s></span>`
+  }
+  return `<span class="chip ${chipClass}">${name}${escapeHtml(item.text)}</span>`
+}
+
 function renderPreview() {
   const { argv, stdin, warn } = buildPreview()
   const host = document.getElementById('preview')
   const lines = []
 
-  const chipClass = { prog: 'c-prog', script: 'c-script', lit: 'c-lit', var: 'c-var', flag: 'c-flag' }
-  const chips = argv.map((item) =>
-    `<span class="chip ${chipClass[item.kind] ?? 'c-lit'}" title="${escapeAttr(item.kind)}">${escapeHtml(item.text)}</span>`)
-  lines.push(`<div class="line"><span class="tag">argv</span>${chips.join('') || '<span class="chip empty">（空）</span>'}</div>`)
+  lines.push(`<div class="line"><span class="tag">argv</span>${argv.map(chipFor).join('') || '<span class="chip empty">（空）</span>'}</div>`)
 
-  const keys = Object.keys(stdin)
-  if (keys.length > 0) {
-    lines.push(`<div class="line"><span class="tag">stdin</span><span class="chip c-stdin">${escapeHtml(JSON.stringify(stdin))}</span></div>`)
+  if (stdin.length > 0) {
+    const chips = stdin.map((entry) =>
+      `<span class="chip c-stdin"><b class="nm">${escapeHtml(entry.name || '(未命名)')}</b>${escapeHtml(JSON.stringify(entry.value))}</span>`)
+    lines.push(`<div class="line"><span class="tag">stdin</span>${chips.join('')}</div>`)
   }
 
   host.innerHTML = lines.join('')
-  document.getElementById('counts').textContent = `argv ${argv.length} 个元素` + (keys.length ? ` · stdin ${keys.length} 个键` : '')
+  document.getElementById('counts').textContent =
+    `argv ${argv.length} 个元素` + (stdin.length ? ` · stdin ${stdin.length} 个键` : '')
 
   const errors = validate()
   for (const message of warn) errors.push(message)
