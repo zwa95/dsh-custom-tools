@@ -157,6 +157,23 @@
   }
   .pill:hover { border-color: var(--text-3); color: var(--text-1); }
   .pill.on { background: rgba(76,141,255,.16); border-color: var(--brand); color: #cfe0ff; }
+
+  .opts { display: grid; gap: 2px; margin: 2px 0 4px; }
+  .opt {
+    display: grid;
+    grid-template-columns: 16px minmax(150px, max-content) 1fr;
+    align-items: baseline;
+    gap: 8px;
+    padding: 3px 6px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-2);
+  }
+  .opt:hover { background: rgba(255,255,255,.03); }
+  .opt input { margin: 0; cursor: pointer; }
+  .opt .opt-label { color: var(--text-1); }
+  .opt .opt-eg { color: var(--text-3); font-family: var(--mono); font-size: 11px; }
   .cb { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-2); cursor: pointer; }
   .cb input { accent-color: var(--brand); }
 
@@ -429,9 +446,10 @@ function isBlank(value) {
 function variableChips(piece) {
   const text = slotText(piece)
   const notes = []
-  if (piece.repeat) notes.push('×n 逐项')
+  if (piece.repeat) notes.push('数组逐项')
+  if (piece.join) notes.push('以 ' + piece.join + ' 连接')
   if (piece.json) notes.push('JSON')
-  if (piece.omitIfEmpty) notes.push('空值不传')
+  if (piece.omitIfEmpty) notes.push('空值省略')
   return [{ kind: 'var', name: piece.name, text, notes }]
 }
 
@@ -675,34 +693,57 @@ function variableBody(piece) {
 
   // 拼进 argv 还是写进 stdin 由模式决定，不让作者逐个变量选。
   if (state.mode !== 'powershell') {
-    const pills = el('div', 'pills')
-    pills.appendChild(pill('逐项展开（数组）', piece.repeat, (on) => {
-      piece.repeat = on
-      if (on) piece.join = ''
-      renderAll()
-    }))
-    pills.appendChild(pill('合并成一个（数组）', piece.join !== '' && piece.join !== undefined && piece.join !== null, (on) => {
-      if (on) { piece.join = piece.join || ','; piece.repeat = false } else { piece.join = '' }
-      renderAll()
-    }))
-    pills.appendChild(pill('JSON 序列化', piece.json, (on) => { piece.json = on; renderPreview() }))
-    pills.appendChild(pill('空值时不传', piece.omitIfEmpty, (on) => { piece.omitIfEmpty = on; renderPreview() }))
-    pills.appendChild(pill('允许以 - 开头', piece.allowLeadingDash, (on) => { piece.allowLeadingDash = on; renderPreview() }))
-    body.appendChild(pills)
+    const opts = el('div', 'opts')
+    if (piece.type === 'array') {
+      opts.appendChild(optionRow(
+        '数组拆成多个 argv',
+        '<tags> 收到 [a,b] → a、b 各占一格（有前缀时每格都带前缀）',
+        piece.repeat,
+        (on) => { piece.repeat = on; if (on) piece.join = ''; renderAll() },
+      ))
+      opts.appendChild(optionRow(
+        '数组拼成一个 argv',
+        '<tags> 收到 [a,b] → a,b 一个元素；分隔符在下面填',
+        piece.join !== '' && piece.join !== undefined && piece.join !== null,
+        (on) => { if (on) { piece.join = piece.join || ','; piece.repeat = false } else { piece.join = '' } renderAll() },
+      ))
+    }
+    opts.appendChild(optionRow(
+      '值写成 JSON',
+      '[1,2] → [1,2] 一个元素，而不是 1、2 两格',
+      piece.json,
+      (on) => { piece.json = on; renderPreview() },
+    ))
+    opts.appendChild(optionRow(
+      '空值就不传',
+      '模型没给值 → 这一格整个消失，不留空串',
+      piece.omitIfEmpty,
+      (on) => { piece.omitIfEmpty = on; renderPreview() },
+    ))
+    opts.appendChild(optionRow(
+      '允许值以 - 开头',
+      '默认拒绝 --foo 这类值，防止被当成选项',
+      piece.allowLeadingDash,
+      (on) => { piece.allowLeadingDash = on; renderPreview() },
+    ))
+    body.appendChild(opts)
 
-    const pad = el('div', 'grid3')
-    pad.appendChild(field('前缀', textEl(piece.prefix, '如 --glob=', (next) => {
+    const joining = piece.join !== '' && piece.join !== undefined && piece.join !== null
+    const pad = el('div', joining ? 'grid3' : 'grid2')
+    pad.appendChild(field('前缀（贴在这一格前面）', textEl(piece.prefix, '如 --glob=', (next) => {
       piece.prefix = next
       renderPreview()
     }, 'mono')))
-    pad.appendChild(field('后缀', textEl(piece.suffix, '如 .json', (next) => {
+    pad.appendChild(field('后缀（贴在这一格后面）', textEl(piece.suffix, '如 .json', (next) => {
       piece.suffix = next
       renderPreview()
     }, 'mono')))
-    pad.appendChild(field('合并分隔符', textEl(typeof piece.join === 'string' ? piece.join : '', '如 ,', (next) => {
-      piece.join = next
-      renderPreview()
-    }, 'mono')))
+    if (joining) {
+      pad.appendChild(field('合并分隔符', textEl(typeof piece.join === 'string' ? piece.join : '', '如 ,', (next) => {
+        piece.join = next
+        renderPreview()
+      }, 'mono')))
+    }
     body.appendChild(pad)
 
     body.appendChild(elHint('例：前缀 --glob= + 值 *.js → argv 里是 --glob=*.js 一个元素。'))
@@ -882,6 +923,21 @@ function pill(label, on, onChange) {
   if (on) button.classList.add('on')
   button.addEventListener('click', () => onChange(!on))
   return button
+}
+
+function optionRow(label, example, on, onChange) {
+  const row = document.createElement('label')
+  row.className = 'opt'
+  const box = document.createElement('input')
+  box.type = 'checkbox'
+  box.checked = Boolean(on)
+  box.addEventListener('change', () => onChange(box.checked))
+  const name = el('span', 'opt-label')
+  name.textContent = label
+  const eg = el('span', 'opt-eg')
+  eg.textContent = example
+  row.append(box, name, eg)
+  return row
 }
 
 function seg(options, value, onChange, render) {
