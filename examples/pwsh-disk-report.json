@@ -5,9 +5,12 @@
   "whenToUse": "需要一眼看到磁盘剩余空间时使用；比让模型拼 bash/pwsh 命令更稳，也不会因为引用错误而失败。",
   "mode": "powershell",
   "command": "$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json; $drive = $payload.drive; Get-PSDrive -PSProvider FileSystem | Where-Object { -not $drive -or $_.Name -eq $drive } | Select-Object Name, @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}} | Format-Table -AutoSize | Out-String",
-  "args": [{ "stdin": "json" }],
+  "args": [
+    {
+      "stdin": "json"
+    }
+  ],
   "cwd": ".",
-  "sandbox": "read-only",
   "approval": "inherit",
   "concurrency": "parallel",
   "timeoutMs": 30000,
@@ -17,5 +20,7 @@
       "description": "只看某个盘符，例如 C 或 D；留空表示全部"
     }
   },
-  "output": { "parse": "text" }
+  "output": {
+    "parse": "text"
+  }
 }

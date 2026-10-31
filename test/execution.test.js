@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { tmpdir } from 'node:os'
 import test from 'node:test'
 
 import { compile } from '../src/compiler/compile.js'
@@ -29,12 +30,10 @@ function services(overrides = {}) {
   const spawned = []
   const base = {
     spawned,
-    mode: 'workspace-write',
     exitCode: 0,
     signal: null,
     stdout: 'hello\n',
     stderr: '',
-    confineFails: false,
     spawnFails: false,
     services: {
       subprocess: {
@@ -60,18 +59,6 @@ function services(overrides = {}) {
           }
         },
       },
-      sandbox: {
-        async confine(argv) {
-          if (base.confineFails) throw new Error('no runner')
-          return {
-            argv: ['/usr/bin/sandbox-runner', ...argv],
-            enforcement: 'partial',
-            denialSignatures: ['permission denied'],
-            runnerFailureRules: ['runner failed to start'],
-          }
-        },
-      },
-      sandboxPolicy: { resolve: () => ({ mode: base.mode }) },
       shellEnv: { collect: () => ({ DSH_SESSION_ID: 's1' }) },
       workingDirectory: {
         defaultDirectory: process.cwd(),
@@ -84,7 +71,7 @@ function services(overrides = {}) {
   return base
 }
 
-test('success returns stdout verbatim and passes exact argv through the sandbox', async () => {
+test('success returns stdout verbatim and spawns the exact argv', async () => {
   const fake = services()
   const value = await runCustomTool(fake.services, entryOf(tool()), { target: 'a b' }, {})
 
@@ -93,11 +80,9 @@ test('success returns stdout verbatim and passes exact argv through the sandbox'
   assert.equal(value.exitCode, 0)
   assert.equal(value.argv[0], '/usr/bin/demo')
   assert.deepEqual(value.argv.slice(1), ['run', 'a b'])
-  assert.equal(value.sandbox.declared, 'workspace-write')
-  assert.equal(value.sandbox.enforcement, 'partial')
 
-  // The spawn saw the confined argv, and the values are still separate elements.
-  assert.deepEqual(fake.spawned[0].argv, ['/usr/bin/sandbox-runner', '/usr/bin/demo', 'run', 'a b'])
+  // The spawned argv is the same list, element for element: no wrapper, no join.
+  assert.deepEqual(fake.spawned[0].argv, ['/usr/bin/demo', 'run', 'a b'])
   assert.equal(fake.spawned[0].cwd, process.cwd())
   assert.equal(renderResult(value, { parse: 'text' }), 'hello\n')
 })
@@ -106,126 +91,30 @@ test('every result satisfies the declared output schema', async () => {
   const ok = await runCustomTool(services().services, entryOf(tool()), { target: 'a b' }, {})
   assert.equal(validateJsonSubset(OUTPUT_SCHEMA, ok), null)
 
-  const failed = await runCustomTool(services({ confineFails: true }).services, entryOf(tool()), { target: 'x' }, {})
+  const failed = await runCustomTool(services({ spawnFails: true }).services, entryOf(tool()), { target: 'x' }, {})
   assert.equal(failed.ok, false)
   assert.equal(validateJsonSubset(OUTPUT_SCHEMA, failed), null)
 
-  // Missing arguments bail out before any sandbox tier exists: the result must
-  // still carry the whole block, or the host rejects it as an extra key.
+  // Missing arguments bail out before anything is resolved: the result must
+  // still carry every key, or the host rejects it as an extra property.
   const early = await runCustomTool(services().services, entryOf(tool()), {}, {})
   assert.equal(early.code, 'INVALID_ARGUMENT')
   assert.equal(validateJsonSubset(OUTPUT_SCHEMA, early), null)
 })
 
-test('full access skips confinement entirely', async () => {
-  const fake = services({ mode: 'danger-full-access' })
-  const value = await runCustomTool(fake.services, entryOf(tool({ sandbox: 'danger-full-access' })), { target: 'x' }, {})
-
-  assert.equal(value.ok, true)
-  assert.deepEqual(fake.spawned[0].argv, ['/usr/bin/demo', 'run', 'x'])
-  assert.equal(value.sandbox.effective, 'danger-full-access')
-})
-
-test('a session may only tighten the declared tier', async () => {
-  const fake = services({ mode: 'read-only' })
-  const value = await runCustomTool(
-    fake.services,
-    entryOf(tool({ sandbox: 'danger-full-access' })),
-    { target: 'x' },
-    {},
-  )
-  assert.equal(value.sandbox.effective, 'read-only')
-  assert.deepEqual(fake.spawned[0].argv[0], '/usr/bin/sandbox-runner')
-})
-
-test('a Windows bash tool refuses the sandbox token instead of dying in msys2 init', async () => {
-  // Measured: every ordinary bash on Windows is MSYS2/Cygwin, whose runtime fails
-  // creating its signal pipe / BaseNamedObjects under the write-restricted token
-  // in both read-only and workspace-write mode, before argv is parsed. The one
-  // exception is the staged dsh-ops payload, tested separately below.
-  const bashTool = tool({ mode: 'bash', executable: undefined, command: 'echo "$@"' })
-  const noStaged = () => undefined
-
+test('nothing asks the host for a sandbox policy or confinement', async () => {
   const fake = services()
-  const refused = await runCustomTool(
-    fake.services, entryOf(bashTool), { target: 'x' }, {}, { platform: 'win32', findStagedBash: noStaged },
-  )
-  assert.equal(refused.ok, false)
-  assert.equal(refused.code, 'BASH_SANDBOX_UNSUPPORTED')
-  assert.equal(fake.spawned.length, 0)
-  assert.equal(validateJsonSubset(OUTPUT_SCHEMA, refused), null)
+  let consulted = false
+  // A tool runs with the privileges of the harness itself: no policy lookup and
+  // no confinement step may appear in the path.
+  fake.services.sandboxPolicy = { resolve() { consulted = true; return { mode: 'read-only' } } }
+  fake.services.sandbox = { async confine() { consulted = true; return { argv: [] } } }
 
-  // danger-full-access is the documented way to run an ordinary bash on Windows.
-  const full = services({ mode: 'danger-full-access' })
-  const allowed = await runCustomTool(
-    full.services,
-    entryOf({ ...bashTool, sandbox: 'danger-full-access' }),
-    { target: 'x' },
-    {},
-    { platform: 'win32', findStagedBash: noStaged },
-  )
-  assert.equal(allowed.ok, true)
-  assert.equal(full.spawned.length, 1)
-
-  // Other platforms keep the normal confined path.
-  const posix = services()
-  const confined = await runCustomTool(
-    posix.services, entryOf(bashTool), { target: 'x' }, {}, { platform: 'linux', findStagedBash: noStaged },
-  )
-  assert.equal(confined.ok, true)
-  assert.deepEqual(posix.spawned[0].argv[0], '/usr/bin/sandbox-runner')
-})
-
-test('a confined Windows bash uses the staged dsh-ops runtime and its PATH', async () => {
-  const bashTool = tool({
-    mode: 'bash', executable: undefined, command: 'echo "$@"', args: [{ arg: 'target' }],
-  })
-  const staged = {
-    file: 'C:\\dsh-ops\\bash-ipc\\abc\\usr\\bin\\bash.exe',
-    directories: ['C:\\dsh-ops\\bash-ipc\\abc\\usr\\bin', 'C:\\dsh-ops\\bash-ipc\\abc\\ucrt64\\bin'],
-    root: 'C:\\dsh-ops\\bash-ipc\\abc',
-  }
-
-  const fake = services()
-  const value = await runCustomTool(
-    fake.services, entryOf(bashTool), { target: 'x' }, {},
-    { platform: 'win32', findStagedBash: () => staged },
-  )
-
-  assert.equal(value.ok, true)
-  const spawn = fake.spawned[0]
-  // The staged runtime replaces the WSL launcher. The fake confine prefixes its
-  // runner, so the staged bash is argv[1]; the rest keeps the exact shape:
-  // source, $0, then the value.
-  assert.equal(spawn.argv[1], staged.file)
-  assert.deepEqual(spawn.argv.slice(2, 5), ['-c', 'echo "$@"', 'custom-tool'])
-  assert.equal(spawn.argv[5], 'x')
-  // PATH must lead with the staged tree or every external command dies.
-  assert.ok(spawn.env.PATH.startsWith(staged.directories.join(';')), spawn.env.PATH)
-})
-
-test('an explicitly pinned Windows bash is refused rather than silently swapped', async () => {
-  const bashTool = tool({ mode: 'bash', executable: 'bash', command: 'echo "$@"' })
-  const pinned = { ...bashTool, executable: 'C:\\Software\\Git\\bin\\bash.exe' }
-
-  const fake = services()
-  const value = await runCustomTool(
-    fake.services, entryOf(pinned), { target: 'x' }, {},
-    { platform: 'win32', findStagedBash: () => ({ file: 'x', directories: [], root: 'x' }) },
-  )
-
-  assert.equal(value.ok, false)
-  assert.equal(value.code, 'BASH_SANDBOX_UNSUPPORTED')
-  assert.equal(fake.spawned.length, 0)
-})
-
-test('sandbox failure fails closed instead of running bare', async () => {
-  const fake = services({ confineFails: true })
   const value = await runCustomTool(fake.services, entryOf(tool()), { target: 'x' }, {})
 
-  assert.equal(value.ok, false)
-  assert.equal(value.code, 'SANDBOX_UNAVAILABLE')
-  assert.equal(fake.spawned.length, 0)
+  assert.equal(value.ok, true)
+  assert.equal(consulted, false)
+  assert.deepEqual(fake.spawned[0].argv, ['/usr/bin/demo', 'run', 'x'])
 })
 
 test('non-zero exit becomes PROCESS_EXIT with stderr tail', async () => {
@@ -319,41 +208,35 @@ test('ssh-style flags with = stay one element', async () => {
   assert.deepEqual(value.argv, ['/usr/bin/demo', 'run', '--key=a b'])
 })
 
-test('a real agent resolves the sandbox tier from its session', async () => {
+test('a real agent supplies the working directory', async () => {
   const fake = services()
-  const requests = []
-  fake.services.sandboxPolicy = {
-    resolve(request) {
-      requests.push(request)
-      return { mode: 'read-only', sessionId: 'sess-1' }
-    },
+  const seen = []
+  fake.services.workingDirectory = {
+    defaultDirectory: tmpdir(),
+    async ensure(agent) { seen.push(agent); return process.cwd() },
   }
-  const session = { id: 'sess-1' }
 
   const value = await runCustomTool(
     fake.services,
-    entryOf(tool({ sandbox: 'workspace-write' })),
+    entryOf(tool()),
     { target: 'x' },
-    { agent: { session } },
+    { agent: { id: 'agent-1' } },
   )
 
   assert.equal(value.ok, true)
-  assert.equal(value.sandbox.session, 'read-only')
-  assert.equal(value.sandbox.effective, 'read-only')
-  assert.deepEqual(requests, [{ session }])
+  assert.equal(value.cwd, process.cwd())
+  assert.deepEqual(seen, [{ id: 'agent-1' }])
 })
 
-test('an agentless call resolves the deployment default', async () => {
+test('an agentless call falls back to the deployment working directory', async () => {
   const fake = services()
-  const requests = []
-  fake.services.sandboxPolicy = {
-    resolve(request) {
-      requests.push(request)
-      return { mode: 'workspace-write' }
-    },
+  fake.services.workingDirectory = {
+    defaultDirectory: tmpdir(),
+    async ensure() { throw new Error('no agent') },
   }
 
-  await runCustomTool(fake.services, entryOf(tool()), { target: 'x' }, {})
+  const value = await runCustomTool(fake.services, entryOf(tool()), { target: 'x' }, {})
 
-  assert.deepEqual(requests, [{}], 'no session is invented when there is no agent')
+  assert.equal(value.ok, true)
+  assert.equal(value.cwd, tmpdir())
 })

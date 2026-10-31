@@ -6,14 +6,24 @@
   "mode": "executable",
   "executable": "rg",
   "args": [
-    { "literal": "--line-number" },
-    { "literal": "--no-heading" },
-    { "literal": "--color=never" },
-    { "arg": "pattern" },
-    { "arg": "path", "omitIfEmpty": true }
+    {
+      "literal": "--line-number"
+    },
+    {
+      "literal": "--no-heading"
+    },
+    {
+      "literal": "--color=never"
+    },
+    {
+      "arg": "pattern"
+    },
+    {
+      "arg": "path",
+      "omitIfEmpty": true
+    }
   ],
   "cwd": ".",
-  "sandbox": "read-only",
   "approval": "inherit",
   "concurrency": "parallel",
   "timeoutMs": 60000,
@@ -28,6 +38,15 @@
       "description": "限定搜索的子目录或文件；留空表示整个工作区"
     }
   },
-  "output": { "parse": "text" },
-  "examples": [{ "name": "找一下 createServer 在哪", "args": { "pattern": "createServer" } }]
+  "output": {
+    "parse": "text"
+  },
+  "examples": [
+    {
+      "name": "找一下 createServer 在哪",
+      "args": {
+        "pattern": "createServer"
+      }
+    }
+  ]
 }

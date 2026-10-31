@@ -12,7 +12,7 @@ import { register } from 'node:module'
 
 // Peer dependencies only exist inside an installed profile; redirect them to
 // the faithful doubles before the composition root is loaded.
-register('./stubs/loader.mjs', import.meta.url)
+register('../test-support/loader.mjs', import.meta.url)
 const { apply, name, inject } = await import('../index.js')
 
 /** A fake context exposing only what `apply()` actually touches. */
@@ -73,9 +73,6 @@ function fakeContext() {
     },
     shellEnv: {
       collect() { return {} },
-    },
-    sandbox: {
-      async confine(argv) { return { argv, enforcement: 'partial' } },
     },
   }
 

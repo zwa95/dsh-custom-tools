@@ -104,9 +104,6 @@ const ToolSpec = Schema.object({
     .description('声明式 argv / stdin 映射'),
   cwd: Schema.string().default('.')
     .description('相对会话工作目录；模型不可改'),
-  sandbox: Schema.union(['read-only', 'workspace-write', 'danger-full-access'])
-    .default('workspace-write')
-    .description('只能比会话策略更严，永不放宽'),
   approval: Schema.union(['inherit', 'always'])
     .default('inherit'),
   concurrency: Schema.union(['exclusive', 'parallel'])

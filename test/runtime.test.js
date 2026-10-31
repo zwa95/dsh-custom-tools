@@ -58,8 +58,6 @@ function services({ delay = 0 } = {}) {
         }
       },
     },
-    sandbox: { async confine(argv) { return { argv, enforcement: 'full', denialSignatures: [], runnerFailureRules: [] } } },
-    sandboxPolicy: { resolve: () => ({ mode: 'workspace-write' }) },
     shellEnv: { collect: () => ({}) },
     workingDirectory: { defaultDirectory: process.cwd(), async ensure() { return process.cwd() } },
     credentials: { async resolve() { return { value: 'v' } } },

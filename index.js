@@ -4,8 +4,8 @@
  * The composition root does four things and nothing else:
  *
  *   1. translate the host context into the plain `services` object the
- *      executor wants (lazily — a deployment may compose no sandbox, and that
- *      must fail per call as `SANDBOX_UNAVAILABLE`, not at load);
+ *      executor wants, looked up lazily so a partially composed deployment
+ *      still loads and reports each gap per call;
  *   2. own the {@link Manager} and feed it the volatile config snapshot;
  *   3. register `/custom-tools`;
  *   4. tie every registration to this plugin's effect scope.
@@ -28,8 +28,7 @@ export { Config } from './src/config/schema.js'
 /**
  * Only the tool registry is a hard dependency: without it there is nothing to
  * register. Everything else is consumed opportunistically per call, so a
- * profile with no sandbox or no credential store still loads and explains
- * itself.
+ * profile with no credential store still loads and explains itself.
  */
 export const inject = ['tools']
 
@@ -51,12 +50,10 @@ function snapshotOf(config) {
 }
 
 export function apply(ctx, config) {
-  // Services are looked up per call: a sandbox or approval channel may be
-  // mounted later, and a teardown must surface as a clean failure.
+  // Services are looked up per call: an approval channel may be mounted later,
+  // and a teardown must surface as a clean failure.
   const services = {
     get subprocess() { return ctx.get('subprocess') },
-    get sandbox() { return ctx.get('sandbox') },
-    get sandboxPolicy() { return ctx.get('sandboxPolicy') },
     get shellEnv() { return ctx.get('shellEnv') },
     get workingDirectory() { return ctx.get('workingDirectory') },
     get credentials() { return ctx.get('credentials') },

@@ -136,7 +136,6 @@ window.__ModuleLoader__.load({
     }
 
     const MODES = ['executable', 'script', 'bash', 'powershell']
-    const SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access']
     const APPROVALS = ['inherit', 'always']
 
     /** Fields the quick form does not cover, edited as one JSON object. */
@@ -395,28 +394,20 @@ window.__ModuleLoader__.load({
               disabled,
               onChange: (next) => set({ cwd: next }),
             })),
-          h(Field, { label: '沙箱档位', hint: '只能收紧会话档位，不会放宽' },
-            h(Select, {
-              value: asString(tool.sandbox, 'workspace-write'),
-              options: SANDBOXES,
-              disabled,
-              onChange: (next) => set({ sandbox: next }),
-            }))),
-
-        h('div', { style: styles.grid2 },
           h(Field, { label: '审批' },
             h(Select, {
               value: asString(tool.approval, 'inherit'),
               options: APPROVALS,
               disabled,
               onChange: (next) => set({ approval: next }),
-            })),
-          h(Field, { label: '超时（毫秒）', hint: '1000 – 600000' },
-            h(TextInput, {
-              value: String(asNumber(tool.timeoutMs, 120000)),
-              disabled,
-              onChange: (next) => set({ timeoutMs: Number(next) || 0 }),
             }))),
+
+        h(Field, { label: '超时（毫秒）', hint: '1000 – 600000' },
+          h(TextInput, {
+            value: String(asNumber(tool.timeoutMs, 120000)),
+            disabled,
+            onChange: (next) => set({ timeoutMs: Number(next) || 0 }),
+          })),
 
         h(JsonField, {
           label: '参数映射（args）',

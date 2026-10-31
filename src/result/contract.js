@@ -21,13 +21,10 @@ export const ERROR_CODES = Object.freeze([
   'APPROVAL_UNAVAILABLE',
   'CWD_UNAVAILABLE',
   'SCRIPT_UNAVAILABLE',
-  'SANDBOX_UNAVAILABLE',
   'EXECUTABLE_NOT_FOUND',
   'SPAWN_FAILED',
   'ABORTED',
   'TIMED_OUT',
-  'SANDBOX_DENIED',
-  'BASH_SANDBOX_UNSUPPORTED',
   'PROCESS_EXIT',
   'PROCESS_SIGNALED',
   'OUTPUT_LIMIT',
@@ -64,32 +61,16 @@ export const OUTPUT_SCHEMA = {
     truncated: { type: 'boolean', description: '输出超过上限（v1 视为失败）' },
     argv: { type: 'array', items: { type: 'string' }, description: '实际 argv，逐元素' },
     cwd: { type: 'string' },
-    sandbox: {
-      type: 'object',
-      additionalProperties: false,
-      description: '声明的档位、会话策略求得的档位、最终生效的档位',
-      properties: {
-        declared: { type: 'string', description: '工具定义里声明的档位' },
-        session: { type: 'string', description: '会话策略求得的档位' },
-        effective: { type: 'string', description: '两者取较严后的档位，只可能更严' },
-        enforcement: { type: 'string', description: 'full / partial / 空串表示尚未确定' },
-        autoEnvKeys: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '按解释器自动注入的编码环境变量名',
-        },
-      },
+    autoEnvKeys: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '按解释器自动注入的编码环境变量名',
     },
     data: {
       ...nullableString,
       description: 'parse: json 时的紧凑 JSON 文本，否则为 null',
     },
   },
-}
-
-/** The sandbox block travels with every result, so it never gains a key late. */
-export function emptySandbox() {
-  return { declared: '', session: '', effective: '', enforcement: '', autoEnvKeys: [] }
 }
 
 /**
@@ -113,7 +94,7 @@ export function emptyResult() {
     truncated: false,
     argv: [],
     cwd: '',
-    sandbox: emptySandbox(),
+    autoEnvKeys: [],
     data: null,
   }
 }

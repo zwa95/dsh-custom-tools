@@ -76,7 +76,6 @@ function renderList(manager) {
       tool.enabled ? 'enabled' : 'disabled',
       tool.registered ? 'registered' : 'not-registered',
       tool.mode,
-      `sandbox=${tool.sandbox}`,
       `timeout=${tool.timeoutMs}ms`,
     ]
     return `- ${tool.name}${tool.title ? `（${tool.title}）` : ''}  [${flags.join(', ')}]`
@@ -110,18 +109,15 @@ function renderPreview(result) {
   if (result.ok !== true) {
     return `预览失败：[${result.code}] ${result.message}${result.hint ? `\n提示：${result.hint}` : ''}`
   }
-  const sandbox = result.sandbox ?? {}
   const lines = [
     '（预览：没有启动任何进程）',
     '',
     `cwd: ${result.cwd}`,
     'argv:',
     ...result.argv.map((element, index) => `  ${index}: ${JSON.stringify(element)}`),
-    '',
-    `沙箱：声明 ${sandbox.declared} / 会话 ${sandbox.session} / 生效 ${sandbox.effective}`,
   ]
-  if (sandbox.autoEnvKeys && sandbox.autoEnvKeys.length > 0) {
-    lines.push(`自动编码环境：${sandbox.autoEnvKeys.join(', ')}`)
+  if (result.autoEnvKeys && result.autoEnvKeys.length > 0) {
+    lines.push('', `自动编码环境：${result.autoEnvKeys.join(', ')}`)
   }
   return lines.join('\n')
 }

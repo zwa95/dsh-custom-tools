@@ -5,12 +5,23 @@
   "whenToUse": "当需要知道工作区是否有未提交改动、当前在哪个分支时使用；比 bash 更省 token，也不给出改文件的可能。",
   "mode": "executable",
   "executable": "git",
-  "args": [{ "literal": "status" }, { "literal": "--short" }, { "literal": "--branch" }],
+  "args": [
+    {
+      "literal": "status"
+    },
+    {
+      "literal": "--short"
+    },
+    {
+      "literal": "--branch"
+    }
+  ],
   "cwd": ".",
-  "sandbox": "workspace-write",
   "approval": "inherit",
   "concurrency": "parallel",
   "timeoutMs": 30000,
   "parameters": {},
-  "output": { "parse": "text" }
+  "output": {
+    "parse": "text"
+  }
 }

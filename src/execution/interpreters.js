@@ -2,10 +2,10 @@
  * Interpreter resolution for the two shell modes.
  *
  * On Windows `bash` on `PATH` is usually `C:\Windows\System32\bash.exe` — the
- * WSL launcher, which is not bash and cannot start inside a confined run. A
- * `mode: bash` tool that leaves `executable` unset therefore has to look for a
- * real bash the same way a person would: next to `git`, in the usual install
- * roots, or in an MSYS2 tree.
+ * WSL launcher, which is not a Unix shell at all. A `mode: bash` tool that
+ * leaves `executable` unset therefore has to look for a real bash the same way
+ * a person would: next to `git`, in the usual install roots, or in an MSYS2
+ * tree.
  *
  * The order is fixed and derived only from the deployment environment. A model
  * argument can never influence it, and an explicit `executable` always wins.

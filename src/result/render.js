@@ -1,11 +1,11 @@
 /**
  * The single model-facing projection.
  *
- * Everything else about a run — exact argv, cwd, sandbox tiers, duration, exit
- * code — stays in the returned value, where the UI, the logs and
- * `ToolErrorInfo.reason` can read it. The model only gets what a human would
- * paste into a terminal: the program's own output, or a short, stable failure
- * header plus the tail of stderr.
+ * Everything else about a run — exact argv, cwd, duration, exit code — stays in
+ * the returned value, where the UI, the logs and `ToolErrorInfo.reason` can read
+ * it. The model only gets what a human would paste into a terminal: the
+ * program's own output, or a short, stable failure header plus the tail of
+ * stderr.
  *
  * This is what keeps a custom tool from becoming a context hog: a 1 MB stdout is
  * already refused upstream by OUTPUT_LIMIT, and a successful run is never wrapped
@@ -63,8 +63,8 @@ export function renderResult(value, options = {}) {
 
 /**
  * The user-facing detail attached to `ToolErrorInfo.reason`: model-invisible,
- * but preserved in durable projections. This is where argv/cwd/duration/sandbox
- * become legitimate to show.
+ * but preserved in durable projections. This is where argv/cwd/duration become
+ * legitimate to show.
  */
 export function describeForUser(value) {
   const lines = []
@@ -76,10 +76,6 @@ export function describeForUser(value) {
   lines.push(`exitCode: ${value.exitCode === null ? 'null' : value.exitCode}`)
   if (value.signal) lines.push(`signal: ${value.signal}`)
   lines.push(`durationMs: ${value.durationMs}`)
-  if (value.sandbox) {
-    lines.push(`sandbox: declared=${value.sandbox.declared} `
-      + `session=${value.sandbox.session} effective=${value.sandbox.effective}`)
-  }
   return lines.join('\n')
 }
 

@@ -74,7 +74,6 @@ function compileOne(spec, deferLoading) {
 
     args: Array.isArray(spec.args) ? spec.args : [],
     cwd: typeof spec.cwd === 'string' && spec.cwd !== '' ? spec.cwd : '.',
-    sandbox: spec.sandbox ?? 'workspace-write',
     approval: spec.approval ?? 'inherit',
     concurrency: spec.concurrency ?? 'exclusive',
     timeoutMs: spec.timeoutMs ?? 120000,

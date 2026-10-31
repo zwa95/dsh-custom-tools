@@ -19,7 +19,6 @@ function fakeServices(overrides = {}) {
     exitCode: 0,
     stdout: 'ok\n',
     stderr: '',
-    sessionMode: 'workspace-write',
     resolve: overrides.resolve,
   }
   const services = {
@@ -40,12 +39,6 @@ function fakeServices(overrides = {}) {
         }
       },
     },
-    sandbox: {
-      async confine(argv) {
-        return { argv, enforcement: 'partial', denialSignatures: [], runnerFailureRules: [] }
-      },
-    },
-    sandboxPolicy: { resolve: () => ({ mode: state.sessionMode }) },
     shellEnv: { collect: () => ({}) },
     workingDirectory: { defaultDirectory: process.cwd(), ensure: async () => process.cwd() },
   }
@@ -92,11 +85,7 @@ test('a default bash that resolves to the WSL launcher falls back to a real bash
       command: 'echo "$@"',
       parameters: { value: { type: 'string', required: true } },
       args: [{ arg: 'value' }],
-      // bash on Windows is only reachable with full access (msys2 cannot start
-      // under the write-restricted token); this test is about which binary wins.
-      sandbox: 'danger-full-access',
     })
-    state.sessionMode = 'danger-full-access'
     const result = await runCustomTool(services, entry, { value: 'hi' }, { signal: null })
     assert.equal(result.ok, true)
     assert.equal(state.spawned.length, 1)
@@ -109,7 +98,6 @@ test('a default bash that resolves to the WSL launcher falls back to a real bash
 
 test('an explicit bash executable is used as given', async () => {
   const { state, services } = fakeServices({ resolve: (name) => name })
-  state.sessionMode = 'danger-full-access'
   const entry = entryOf({
     name: 'shout',
     description: '回显参数',
@@ -118,7 +106,6 @@ test('an explicit bash executable is used as given', async () => {
     command: 'echo "$@"',
     parameters: {},
     args: [],
-    sandbox: 'danger-full-access',
   })
   const result = await runCustomTool(services, entry, {}, { signal: null })
   assert.equal(result.ok, true)

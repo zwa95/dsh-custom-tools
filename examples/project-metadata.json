@@ -6,11 +6,14 @@
   "mode": "executable",
   "executable": "node",
   "args": [
-    { "literal": "-e" },
-    { "literal": "const p=require('./package.json');process.stdout.write(JSON.stringify({name:p.name,version:p.version,scripts:Object.keys(p.scripts??{})}))" }
+    {
+      "literal": "-e"
+    },
+    {
+      "literal": "const p=require('./package.json');process.stdout.write(JSON.stringify({name:p.name,version:p.version,scripts:Object.keys(p.scripts??{})}))"
+    }
   ],
   "cwd": ".",
-  "sandbox": "read-only",
   "approval": "inherit",
   "concurrency": "parallel",
   "timeoutMs": 30000,

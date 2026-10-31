@@ -11,7 +11,7 @@
 | **preset 作用域移出 v1** | `composedPreset` 无 preset 时返回 `undefined` → 工具静默消失（M8）；也避免让用户面对 preset 概念 |
 | **GUI 设置页纳入 v1**，执行能力仍留在 `/custom-tools` 命令族 | `settings.section` 通过 `remote.settings.describe()/mutate()` 编辑并持久化 volatile Config；浏览器无 Host 执行通道，因此 preview/test/status/list 仍由命令族承担 |
 | **「测试 / 试运行」升为一等公民** | 用户要求：配置完必须能立刻测，不能等运行时才发现错 |
-| 默认沙箱 `read-only` → `workspace-write`，且声明只能收紧 | X1 / H5 |
+| **执行沙箱整体移除**：工具与宿主同权限运行 | 用户决定（v1 收尾）：自制小工具运行时会读写 `temp`/缓存，不能要求作者为适配 DSH 沙箱改自己的工具；插件的目的是接入已有工具，不是倒腾沙箱配置 |
 | 提交协议改为「同步单点换指针 + 每步 try/catch + 复核」 | H1 / X2 |
 | 代际 pin 只保留方案 B（closure 快照），release 幂等不抛 | H2 |
 | 取消机制改为 ToolSlot 自建 `AbortController` | B2 |
@@ -27,7 +27,7 @@
 1. **产品定位**：把你每天敲的那几条命令，固化成 **agent 只能按你定的参数调用** 的工具——它不能改命令、不能加参数、不能换执行方式。价值是**收窄**，不是扩展；"安全"是副产品，"agent 不能自作主张"才是护城河。
 2. **插件形态**：**单 bundle**（Host 半侧 + 一个 Client 半侧），无 Jobs、无 preset 作用域。交付面 = 设置里的一个分页面 + 一组 `/custom-tools` 用户命令。
 3. **工具注册**：每个工具 = `defineTool()` 定义 + 稳定 ToolSlot；热更新靠**不可变 Generation + 单点换指针**，不重注册。
-4. **执行引擎**：统一 `ctx.subprocess`（exact argv）+ `ctx.sandboxPolicy` + `ctx.sandbox.confine()`。**不用 `ctx.shell`**——它是 composition 选择的单方言 seam，同 context 只能挂一个实现，无法同时承载 Bash 与 PowerShell。
+4. **执行引擎**：统一 `ctx.subprocess`（exact argv），**不调用 `ctx.sandbox.confine()`**，与宿主同权限运行。**不用 `ctx.shell`**——它是 composition 选择的单方言 seam，同 context 只能挂一个实现，无法同时承载 Bash 与 PowerShell。
 5. **参数绑定**：模型值**永不进入命令文本**，只经 argv / stdin / env。不做模板、不做转义 helper（见 §5）。
 6. **热更新**：定义存插件 volatile Config（方案 A）→ 保存后 `loader/volatile-update` → 全量校验编译 → **同步提交**；失败保留 last-good。commit 内**禁止 `await`**，drain/retire 推到下一 microtask。
 7. **热启停**：单工具启停是插件内部 `active → quiescing → hidden` 状态机 + 自建 `AbortController`，不碰 Plugin Manager。
@@ -59,7 +59,9 @@
 | `ToolErrorInfo.reason` = "raw user-facing detail; durable projections preserve it but model-facing content does not include it" | `...\docs\subsystems\tools.md:387` ✅ |
 | `'tools/change'` 是注册/注销/限制变化的同步通知；**v1 唯一 listener 是幂等的** | live Event catalog；`...\dsh-tool-subagent\lib\index.js:570-591,601-604` 🔍 |
 
-### 1.2 进程与沙箱
+### 1.2 进程与宿主契约（历史：沙箱条目已不再使用）
+
+> **v1 已移除执行沙箱**。下表保留为运行时取证记录（说明我们为什么不再依赖 `confine()`），不再是实现约束。
 
 | 事实 | 证据 |
 |---|---|
@@ -207,7 +209,6 @@ export const Config = Schema.object({
       .description('bash/powershell 模式的固定源码；模型值只能经 argv/env/stdin 进入'),
     args: Schema.array(ArgBinding).default([]).description('声明式 argv/stdin 映射，见 §5.3'),
     cwd: Schema.string().default('.'),
-    sandbox: Schema.union(['read-only', 'workspace-write', 'danger-full-access'])
       .default('workspace-write'),
     approval: Schema.union(['inherit', 'always']).default('inherit'),
     concurrency: Schema.union(['exclusive', 'parallel']).default('exclusive'),
@@ -233,7 +234,7 @@ export const Config = Schema.object({
 })
 ```
 
-`ArgBinding` 在 Schemastery 中刻意保持扁平；`.check()` / 编译器必须保证每项恰好选择 `literal`、`arg`、`flag` 三种源之一，并且 `join`、`repeat`、`json`、`stdin` 互斥或符合 §5.3 的组合规则。`stdin` 只允许由一条映射产生。`scriptTrust:'trusted-path'` 要求绝对路径；`user-managed` 允许用户自行管理脚本位置，但仍受 cwd、沙箱与可选哈希校验约束。
+`ArgBinding` 在 Schemastery 中刻意保持扁平；`.check()` / 编译器必须保证每项恰好选择 `literal`、`arg`、`flag` 三种源之一，并且 `join`、`repeat`、`json`、`stdin` 互斥或符合 §5.3 的组合规则。`stdin` 只允许由一条映射产生。`scriptTrust:'trusted-path'` 要求绝对路径；`user-managed` 允许用户自行管理脚本位置，但仍受 cwd 与可选哈希校验约束。
 
 两处有意的持久化妥协：
 
@@ -264,7 +265,6 @@ tools:
       - literal: status
       - literal: --porcelain=v1
     cwd: .                      # 相对 Session cwd；模型不可改
-    sandbox: read-only
     timeoutMs: 15000
     parameters:                 # 转 DSH 参数 DSL
       path:
@@ -290,7 +290,7 @@ tools:
 |---|---|---|
 | 形状 / 类型 / 枚举 / 数值范围 / 跨字段一致性 | Schemastery + `.check()`（Host 持久化前） | `mutate` 返回 `settings/rejected` + 消息，**GUI 当场显示，文件不变** |
 | 纯语义 / 编译：重名、保留字、参数 DSL 合法性、`args[].arg` 引用未声明参数、模式缺必填项、JSON 字段、信任/哈希格式 | Manager 纯编译期（§7.3，不做 I/O） | **保留 last-good**；诊断进内存；`/custom-tools status` 显示 |
-| 运行时前置：cwd、解释器/可执行文件、脚本文件与 SHA-256、Credential、审批、沙箱 runner | 每次调用的 preflight | 返回稳定错误码；不破坏当前 Generation，不缓存 Credential |
+| 运行时前置：cwd、解释器/可执行文件、脚本文件与 SHA-256、Credential、审批 | 每次调用的 preflight | 返回稳定错误码；不破坏当前 Generation，不缓存 Credential |
 
 第二级**进不了 GUI**——浏览器侧没有读取 Host 内存的通道（§11.4），这是方案 A 唯一真实的代价，用一条命令补（§11.5）。
 
@@ -334,7 +334,6 @@ Config 住在 patch 里，用户可以「打开配置文件」并自行用版本
     truncated: { type: 'boolean' },
     argv:      { type: 'array', items: { type: 'string' } },
     cwd:       { type: 'string' },
-    sandbox:   { type: 'object', additionalProperties: false,
                  properties: {
                    declared:    { type: 'string' },
                    session:     { type: 'string' },
@@ -344,13 +343,13 @@ Config 住在 patch 里，用户可以「打开配置文件」并自行用版本
                  } },
     value:     { description: 'parse:json 成功时的 JSON 值' },
   },
-  required: ['ok','timedOut','aborted','durationMs','stdout','stderr','truncated','argv','cwd','sandbox'],
+  required: ['ok','timedOut','aborted','durationMs','stdout','stderr','truncated','argv','cwd','autoEnvKeys'],
 }
 ```
 
 **三处必须靠断言、不能只靠 schema**：
 1. `ok:false` ⟺ `code` 与 `message` 必存在；`ok:true` 时三者都不得出现。body 内断言，并有单元测试覆盖。
-2. `sandbox.enforcement` 不可 `required`（`danger-full-access` 不调用 confine，因此没有 enforcement），但 `declared/session/effective/denied` 始终存在。
+2. 每个 result 都带 `autoEnvKeys`（按解释器自动注入的编码环境变量名），成功与失败形状一致。
 3. `value` 只能 annotation-only；插件先断言它是 `JsonValue`，再按可选 `output.schema` 做第二层自校验。
 
 **统一一个 output schema 是硬约束**：所有模式、所有代际共用同一 schema。这样 `createExecution` 捕获的旧 `render`/`projectContent` 作用在新代际的结果上仍然正确（§7.2）。
@@ -371,11 +370,11 @@ Config 住在 patch 里，用户可以「打开配置文件」并自行用版本
 
 v1 的 collected output 不启用 spill。任一 reader 报 `lossy:true` 就返回 `OUTPUT_LIMIT`，不得把部分输出伪装成成功结果，更不得用截断 JSON 继续解析。
 
-**成功时永远不出现在模型上下文里的字段**：`argv`（可能很长）、`cwd`、`durationMs`、`exitCode:0`、`sandbox`、`truncated:false`、`stdout/stderr` 的重复包装。
+**成功时永远不出现在模型上下文里的字段**：`argv`（可能很长）、`cwd`、`durationMs`、`exitCode:0`、`autoEnvKeys`、`truncated:false`、`stdout/stderr` 的重复包装。
 
-理由：这个插件的立项动机就是"skill 方式 token 太贵"。如果每次 `echo.py` 都回一段带 argv、cwd、耗时、沙箱档位的信封，本来 5 个 token 的结果变成 150 个——那还不如继续用 skill。
+理由：这个插件的立项动机就是"skill 方式 token 太贵"。如果每次 `echo.py` 都回一段带 argv、cwd、耗时的信封，本来 5 个 token 的结果变成 150 个——那还不如继续用 skill。
 
-**人类仍然看得到全部**：Work log 的 `presentResult` 展示逐元素 argv、耗时、沙箱档位与 enforcement、截断位置；`/custom-tools test` 打印全量诊断。**UI 层不占模型 token，模型层不为 UI 让路。**
+**人类仍然看得到全部**：Work log 的 `presentResult` 展示逐元素 argv、耗时、截断位置；`/custom-tools test` 打印全量诊断。**UI 层不占模型 token，模型层不为 UI 让路。**
 
 **措辞与有界输出的细则不在这里展开**，见 §4.2.4：三段式骨架、空成功不给空串、超限明确报 `OUTPUT_LIMIT`、错误靠稳定 code；v1 不暴露 spill 路径。
 
@@ -462,12 +461,16 @@ INFO 2026-10-31 01:20:11 starting
 hint: 程序把日志混进了 stdout；让它把日志写 stderr，或改 parse: text
 ```
 
-**F5 · 沙箱拒绝**
+**F5 · 程序自己失败**
 
 ```
-[SANDBOX_DENIED] 在 workspace-write 下被拒绝写入 C:\proj\out.csv
+[PROCESS_EXIT] 命令以退出码 2 结束
 
-hint: 该工具需要访问会话工作目录之外的路径；这不是命令错误，别改命令绕
+[stderr 尾部]
+error: unknown revision 'mian'
+  did you mean 'main'?
+
+hint: 程序已经说明了原因；改参数或改命令，不要重试同一条
 ```
 
 **F6 · 参数错（根本没 spawn）**
@@ -484,7 +487,7 @@ hint: 可用参数：pattern, path
 
 1. 任何失败都有稳定 `code`，绝不出现"未知错误"。
 2. 进程失败一定带退出码 + **stderr 尾部**；stderr 为空才退回 stdout 尾部。
-3. 兜底不改变语义——不换命令、不重试、不放宽沙箱（§4.4 第 4 条）。
+3. 兜底不改变语义——不换命令、不重试、不换个参数再跑一次。
 4. 插件自身异常转成 `CUSTOM_TOOL_INTERNAL`，不穿透 tool body。
 
 **不保证（也不猜）**：
@@ -551,11 +554,11 @@ Line 7: foo()
 
 ### 4.3 错误码与优先级（first cause）
 
-`preflight/approval → sandbox runner failure → abort/timeout → sandbox denial → 非允许 exit → output parse/schema`
+`preflight/approval → spawn failure → abort/timeout → 非零 exit → output parse/schema`
 
-`INVALID_CONFIG` `INVALID_ARGUMENT` `TOOL_RELOADING` `CREDENTIAL_UNAVAILABLE` `APPROVAL_REJECTED` `APPROVAL_UNAVAILABLE` `CWD_UNAVAILABLE` `SCRIPT_UNAVAILABLE` `SANDBOX_UNAVAILABLE` `EXECUTABLE_NOT_FOUND` `SPAWN_FAILED` `ABORTED` `TIMED_OUT` `SANDBOX_DENIED` `PROCESS_EXIT` `PROCESS_SIGNALED` `OUTPUT_LIMIT` `INVALID_JSON_OUTPUT` `OUTPUT_SCHEMA_MISMATCH` `CUSTOM_TOOL_INTERNAL`
+`INVALID_CONFIG` `INVALID_ARGUMENT` `TOOL_RELOADING` `CREDENTIAL_UNAVAILABLE` `APPROVAL_REJECTED` `APPROVAL_UNAVAILABLE` `CWD_UNAVAILABLE` `SCRIPT_UNAVAILABLE` `EXECUTABLE_NOT_FOUND` `SPAWN_FAILED` `ABORTED` `TIMED_OUT` `PROCESS_EXIT` `PROCESS_SIGNALED` `OUTPUT_LIMIT` `INVALID_JSON_OUTPUT` `OUTPUT_SCHEMA_MISMATCH` `CUSTOM_TOOL_INTERNAL`
 
-优先级（first cause，一个失败只报最靠前的一条）：`INVALID_ARGUMENT`（spawn 前）→ `CREDENTIAL_UNAVAILABLE` / `CWD_UNAVAILABLE` → `APPROVAL_REJECTED` / `APPROVAL_UNAVAILABLE` → `EXECUTABLE_NOT_FOUND` / `SCRIPT_UNAVAILABLE` / `SPAWN_FAILED` → `SANDBOX_UNAVAILABLE`（runner 失败）→ `ABORTED` / `TIMED_OUT` → `SANDBOX_DENIED` → `PROCESS_EXIT` / `PROCESS_SIGNALED` → `OUTPUT_LIMIT` / `INVALID_JSON_OUTPUT` / `OUTPUT_SCHEMA_MISMATCH`。
+优先级（first cause，一个失败只报最靠前的一条）：`INVALID_ARGUMENT`（spawn 前）→ `CREDENTIAL_UNAVAILABLE` / `CWD_UNAVAILABLE` → `APPROVAL_REJECTED` / `APPROVAL_UNAVAILABLE` → `EXECUTABLE_NOT_FOUND` / `SCRIPT_UNAVAILABLE` / `SPAWN_FAILED` → `ABORTED` / `TIMED_OUT` → `PROCESS_EXIT` / `PROCESS_SIGNALED` → `OUTPUT_LIMIT` / `INVALID_JSON_OUTPUT` / `OUTPUT_SCHEMA_MISMATCH`。
 
 ### 4.4 失败兜底：三层挡住，零静默降级
 
@@ -567,14 +570,14 @@ Line 7: foo()
 |---|---|---|
 | **保存时**（Schemastery + `.check()`） | 必填缺失、名字格式/重复/保留字、mode 与字段不匹配（如 `mode: executable` 却没 `executable`）、`{flag}` 引用非 `boolean`、JSON 字段不可解析、`output.parse` 非法、`timeoutMs` 越界、恰好一条 stdin 映射 | 设置页立即红字（`settings/rejected`），**根本存不进去** |
 | **编译期**（纯函数 `compile()`，无 I/O） | 映射引用未声明参数、参数类型不合法、信任/哈希字段格式、枚举与类型冲突、`repeat`/`join`/`json`/`stdin` 组合非法、保留字 | 保存成功但该工具不进入代际；**旧代际继续服务**（last-good），诊断进 Manager 内存，由 `/custom-tools status` 读出 |
-| **调用期 preflight**（§6 流水线） | cwd 不可用、可执行器/解释器解析失败、脚本文件缺失或哈希不符、Credential 取不到、审批被拒、沙箱 runner 不可用或拒绝 | 结果里的 `code`；**不改变当前代际**，Credential 与 executor 每次重新解析 |
+| **调用期 preflight**（§6 流水线） | cwd 不可用、可执行器/解释器解析失败、脚本文件缺失或哈希不符、Credential 取不到、审批被拒 | 结果里的 `code`；**不改变当前代际**，Credential 与 executor 每次重新解析 |
 | **调用期运行** | 超时、abort、退出码、信号、输出超限/解析/校验 | 结果里的 `code` + 有界 stderr 尾部 |
 
 #### 2) 模型看到什么（有界、可诊断、不撒谎）
 
-`ok:false` 时 **JSON value** 固定带：`code` / 一句话 `message` / `hint` / `exitCode` / `stdout` / `stderr` / `argv`（逐元素，凭据位脱敏）/ `cwd` / `durationMs` / `sandbox`。
+`ok:false` 时 **JSON value** 固定带：`code` / 一句话 `message` / `hint` / `exitCode` / `stdout` / `stderr` / `argv`（逐元素，凭据位脱敏）/ `cwd` / `durationMs` / `autoEnvKeys`。
 
-但**模型正文只看到** `code` + `message` + stderr 尾部（stderr 为空才退回 stdout 尾部）+ `hint`；`argv`/`cwd`/`durationMs`/`sandbox` 只进 durable value 与用户侧诊断（§4.2.1）。
+但**模型正文只看到** `code` + `message` + stderr 尾部（stderr 为空才退回 stdout 尾部）+ `hint`；`argv`/`cwd`/`durationMs` 只进 durable value 与用户侧诊断（§4.2.1）。
 
 v1 不启用 spill，所以“头部/尾部各留多少”只是有界缓冲内的自然形态；一旦 reader 报 `lossy:true` 就整体转 `OUTPUT_LIMIT`，不做部分呈现。
 
@@ -589,15 +592,13 @@ v1 不启用 spill，所以“头部/尾部各留多少”只是有界缓冲内�
 | `PROCESS_EXIT` | 退出码非 0 一律按失败报（Unix 约定）；看 stderr 定位原因 |
 | `PROCESS_SIGNALED` | 进程被外部杀掉（任务管理器/父进程/系统）；不是命令写错了 |
 | `TIMED_OUT` | 缩小输入或调大 `timeoutMs`；**不要靠重试** |
-| `SANDBOX_DENIED` | 该工具需要访问会话工作目录之外的路径；这不是命令错误，别改命令绕 |
-| `SANDBOX_UNAVAILABLE` | 宿主沙箱自身不可用（fail closed）；找用户，不要改命令 |
 | `OUTPUT_LIMIT` | 让程序少打印或加 `tail`/`head` 类参数 |
 | `INVALID_JSON_OUTPUT` | 程序把日志混进了 stdout；让它把日志写 stderr，或改 `parse: text` |
 | `OUTPUT_SCHEMA_MISMATCH` | 键名/类型不符；对照工具 description 里的输出约定 |
 
 #### 3) 用户看到什么
 
-- `ToolErrorInfo.reason`：完整可读原因 + JSON 形式的 `code/message/hint/exitCode/argv/cwd/sandbox`，**durable 可见、model-facing 不可见**。
+- `ToolErrorInfo.reason`：完整可读原因 + JSON 形式的 `code/message/hint/exitCode/argv/cwd/autoEnvKeys`，**durable 可见、model-facing 不可见**。
 - `/custom-tools test` 是复现入口（与模型调用**同一条代码路径**，§6.6）。
 - `/custom-tools status` 在 last-good 生效时必须明说「当前仍在使用上一版定义」，并列出被拒工具的诊断。
 - v1 不写 `state.json`、不做跨会话 `lastError` 持久化；设置页也**不显示**错误徽标（浏览器读不到 Host 内存，见 §11.4）。内存计数器可作为 v1.1 候选。
@@ -606,12 +607,12 @@ v1 不启用 spill，所以“头部/尾部各留多少”只是有界缓冲内�
 
 1. **不换命令**：CLI 失败不自动降级成另一种执行方式（比如 exe 失败退回 bash）。
 2. **不自动重试**：写操作重试会重复副作用，读操作重试会掩盖真故障。重试交给模型或用户显式决定。
-3. **不放宽沙箱**：`SANDBOX_DENIED` 之后绝不"顺手"用 full-access 再跑一次（§6.4 只能收紧）。
+3. **不重跑**：失败之后绝不"顺手"换个参数再跑一次；失败就是失败，交给人判断。
 4. **不吞 stderr**：即使成功也保留 stderr（很多 CLI 用 stderr 报 warning），只是不因为非空就判失败。
 
 #### 5) 插件自己崩了怎么办
 
-`execute` 里任何未预期异常必须在最外层 catch 成 `ok:false, code:'CUSTOM_TOOL_INTERNAL'`，`message` 给一行摘要、完整堆栈进 `reason`（durable 可见、model-facing 不可见）。绝不让异常穿出 tool body——穿出去虽然会被宿主兜成 error result，但会丢掉我们所有结构化诊断字段（`argv`/`exitCode`/`sandbox` 全没了），等于把可诊断的失败降级成"未知错误"。
+`execute` 里任何未预期异常必须在最外层 catch 成 `ok:false, code:'CUSTOM_TOOL_INTERNAL'`，`message` 给一行摘要、完整堆栈进 `reason`（durable 可见、model-facing 不可见）。绝不让异常穿出 tool body——穿出去虽然会被宿主兜成 error result，但会丢掉我们所有结构化诊断字段（`argv`/`exitCode`/`autoEnvKeys` 全没了），等于把可诊断的失败降级成"未知错误"。
 
 ---
 
@@ -670,7 +671,7 @@ Node:  [node,  scriptPath, ...mappedArgs]
 
 唯一例外是 `dsh-ops` 自带并 stage 出去的那份运行时：pinned MSYS payload + `opsipc.dll`/`opsnt.dll` 两个 IPC 兼容代理，落在 `$DSH_HOME/dsh-ops/bash-ipc/<identity>/usr/bin/bash.exe`（`dsh-ops/lib/bash-ipc.js:confinedBash()` 生成，`restrictedRemedy()` 也明说自定义 bashPath「works only in danger-full-access」）。用未打补丁的官方 runner 实测：`bash -c`、`$0`/`$@` 位置传参（含空格、引号、内嵌换行、中文、`--notaflag`）、stdin 往返、`exit 7`、stdout/stderr 分离、staged `ls.exe` 全部正常，且**工作区外写仍被拒**（builtin 重定向与 staged `touch` 双证），`--mode read-only` 也成立。两个硬约束：子进程 PATH 必须以 staged 树打头（`<root>/usr/bin`、`<root>/ucrt64/bin`、`<root>/cmd`，再拼 ambient），否则外部命令解析到另一份未锁定 msys 并死于 signal pipe；Low IL 下 `$HOME` 只读，可写处只有工作区与 runner temp。
 
-因此执行期策略是：`win32 + mode:bash + 受限档位 + executable 未钉死` 时用 `src/execution/dshbash.js` 的 `resolveStagedBash()` 找那份 staged 运行时（要求 `bash.exe` + `msys-2.0.dll` + `opsipc.dll` 齐全，按 mtime 取最新），并用 `pathWithStaged()` 把它自己的目录插到 PATH 最前；找不到则早退 `BASH_SANDBOX_UNSUPPORTED` 并说明原因。作者显式钉死 `executable` 时**不替换**（尊重作者意图；钉死普通 bash 在受限档位下仍会失败），full-access 档位走原来的 `bashCandidates()` 搜索。
+这段取证保留为历史：v1 已移除执行沙箱，`src/execution/dshbash.js`（`resolveStagedBash()` / `pathWithStaged()`）随沙箱一起删除。现在只剩一件事——PATH 上的 `bash` 若是 WSL 启动器，就按 `bashCandidates()` 的固定顺序找一个真实的 MSYS2/Git Bash；作者钉死 `executable` 时原样使用。
 
 ### 5.3 声明式参数映射 grammar（补完 F3 三个硬墙）
 
@@ -704,26 +705,18 @@ Node:  [node,  scriptPath, ...mappedArgs]
 2. 校参（DSH DSL + JSON 默认值填充 + 未声明键检查 + enum/范围校验）
 3. cwd 预检：有 agent 时 workingDirectory.ensure(agent, signal)，否则用部署默认目录；
    解析相对 cwd → statSync 确认存在且是目录 → 否则 CWD_UNAVAILABLE
-   （必须早于 confine，否则会被误判成沙箱 runner 失败——M3）
+   （必须先于 spawn，坏 cwd 要报 CWD_UNAVAILABLE，而不是让 spawn 抛 SPAWN_FAILED）
 4. approval：按 §6.3 决定是否 request；非 allowed-once 即失败
 5. credentials：逐个 resolve(ref)，失败 → CREDENTIAL_UNAVAILABLE
 6. resolveExecutable（当次）→ absolute；script 模式另做脚本存在性与可选 SHA-256 校验
    → EXECUTABLE_NOT_FOUND / SCRIPT_UNAVAILABLE
 7. 构造 exact argv（§5.2）+ env overlay（受信 DSH_* + 静态明文 + 凭据 + 声明绑定）
-8. sandboxPolicy.resolve({}) → sessionPolicy
-   （公开 ToolExecution 没有 Session 字段；有 Agent 时用当前部署会话的默认策略求值，
-     agentless 调用一律按默认策略，绝不伪造 Session）
-   effective = stricter(manifestMode, sessionPolicy.mode)      ← §6.4，只能收紧
-   8a effective === 'danger-full-access' → 直接 spawn（不调 confine——H4）
-   8b 否则 → await sbx.confine(argv, effectivePolicy, fusedSignal) → spawn(confined.argv)
-      沙箱不可用 → SANDBOX_UNAVAILABLE（fail closed，绝不裸跑）
-9. spawn；bounded collect；await handle.done；await waitForExit() 直到真退出
+8. spawn(argv) 直接交给 ctx.subprocess（**没有任何 confinement 层**，见 §6.4）
+9. bounded collect；await handle.done；await waitForExit() 直到真退出
 10. 分类：
     timeoutOf(e) → TIMED_OUT ；调用方 abort → ABORTED
-    runner failure：仅当「exit≠0 且 confined.argv[0] ≠ originalArgv[0] 且 stderr 命中签名」→ SANDBOX_UNAVAILABLE（M2：签名只是辅助判据，不是唯一判据）
-    denial：同上限定后命中 denial 签名 → SANDBOX_DENIED
     exitCode ≠ 0 → PROCESS_EXIT（Unix 约定：唯一成功码是 0，不做可配置白名单）
-    signal ≠ null 且非本次 abort/timeout 所杀 → PROCESS_SIGNALED（外部被杀，含沙箱 runner 之外的任务管理器/系统）
+    signal ≠ null 且非本次 abort/timeout 所杀 → PROCESS_SIGNALED（外部被杀：任务管理器、系统关机等）
 11. parse:json 仅当全程成功且未截断 → 否则 INVALID_JSON_OUTPUT / OUTPUT_LIMIT
 12. 返回统一结构（§4.2）；v1 不落盘 counters
 ```
@@ -744,7 +737,7 @@ const fused = AbortSignal.any([exec.signal, own.signal])
 
 ### 6.2 关键纪律
 
-- 沙箱缺失/失败 **fail closed**，绝不回退裸 spawn。
+- 没有任何隐式回退：cwd 不存在就 `CWD_UNAVAILABLE`，可执行器找不到就 `EXECUTABLE_NOT_FOUND`，绝不猜一个替代品顶上。
 - 超时/取消后**必须** `terminate()` 并等真退出，不能 `Promise.race` 后遗弃进程。
 - 所有值当次解析，**不缓存** policy / credential / executable。
 - 默认 `isConcurrencySafe: () => false`（exclusive）；只有 manifest 显式 `concurrency: parallel` 才 `true`。
@@ -753,24 +746,28 @@ const fused = AbortSignal.any([exec.signal, own.signal])
 ### 6.3 审批（对齐宿主词汇，F8 修复）
 
 - 工具字段是 `approval: inherit | always`（**不是** `auto`）。
-- `inherit` → 完全交给宿主的会话策略 `ask|never` 与沙箱升级流程；插件不额外弹窗。
+- `inherit` → 完全交给宿主的会话策略 `ask|never`；插件不额外弹窗。
 - `always` → 每次执行前强制 `ctx.approval.request()`，用于 `danger-full-access` / 有外部副作用 / 花凭据的工具。
 - ⚠️ **`always` + 会话 `never` = 永远失败**：这是宿主的硬语义，不能绕过。因此：
   - 加载期检测会话策略不可行（会话未创建）→ 改为**运行期**给可执行诊断：`APPROVAL_UNAVAILABLE` + "本工具要求每次确认，但当前会话审批策略为 `never`；改会话设置或把工具改回 `inherit`"。
   - 文档必须写明，并在 `/custom-tools test` 时就把这条冲突**提前报出来**。
-- **v1 不实现单次沙箱升级**（`allowEscalation` 不做）。因此必须：
-  - 自己渲染 `SANDBOX_DENIED` 文案，**绝不复制宿主那句固定的"retry with sandbox_permissions"提示**（F9：那句话在骗人）；
-  - 从 stdout/stderr 里**剥离** runner 标记 `[sandbox: file access denied under X mode]`，换成我们的可执行建议（"把工具的 `sandbox` 提到 `workspace-write`，或用 `/sandbox` 调会话档位"）。
+### 6.4 执行权限（v1：无 confinement）
 
-### 6.4 沙箱档位（X1 + H5 修复）
+v1 **不调用 `ctx.sandbox.confine()`**，也不读取 `ctx.sandboxPolicy`：工具进程与宿主同权限运行。
 
-```
-effective = stricter(manifest.sandbox ?? defaults.sandbox, sessionPolicy.mode)
-```
+- 理由（用户决定）：自制小工具运行时必然写 `temp`、缓存、`~/.config`；要求作者为自己的工具适配 DSH 沙箱，等于把「接入工具」变成「倒腾沙箱配置」，与本插件目的相反。
+- 因此 `effective = stricter(...)` 这一整套口径**已废弃**，`sandbox` 字段从 Config、plan、结果信封里全部移除。
+- 权限边界的唯一保证变成：**模型参数只能填声明过的值**，永远改不了启动哪个程序、从哪个目录、带哪些环境变量键（§10 威胁模型）。
+- 作者要隔离，自己用容器/虚拟机/受限账户；插件不做这个承诺，也不做部分承诺。
 
-- **只能收紧，永不放宽**：manifest 写 `danger-full-access` 而会话是 `read-only` → 实际 `read-only`。
-- **默认 `workspace-write`**（v1 改动，原为 `read-only`）：Windows 上 read-only 既不构成读保密边界，又稳定制造拒绝，是纯负面默认。想更严的作者自己写 `read-only`。
-- 诊断里必须同时显示三件事：`声明档位 / 会话档位 / 生效档位`。
+### 6.4.1 我们放弃了什么（写清楚，别假装）
+
+| 放弃的能力 | 后果 | 谁该补 |
+|---|---|---|
+| 写路径白名单 | 工具进程可写 `~/.ssh`、`.env`、甚至本插件的 `index.js` | 用户与工具作者 |
+| 网络隔离 | 工具可联网 | 用户与工具作者 |
+| CPU/内存/PID 配额 | 一个失控工具能拖垮宿主 | 用户（超时只杀进程，不管资源） |
+| 读保密 | `read-only` 本来就挡不住读，Windows 下 `enforcement` 也只到 `partial` | 无 |
 
 ### 6.5 观测（F4 修复，v1 刻意缩减）
 
@@ -784,12 +781,12 @@ v1 可观测性由三处承担：①`/custom-tools status` 报告当前代际、
 
 ```
 /custom-tools preview <name> [--args='{"path":"."}']
-    只走 §6 的 1-2、7 步：打印逐元素 argv、cwd、env 键名（值脱敏）、
-    将要使用的沙箱档位。永不 spawn。
+    只走 §6 的 1-2、6-7 步：打印逐元素 argv、cwd、env 键名（值脱敏）、
+    按解释器注入的 autoEnvKeys。永不 spawn。
 
 /custom-tools test <name> [--example=<n>] [--args='{...}']
     走 §6 的**全部**步骤——与模型调用完全同一条代码路径，只是 entry 不是 ToolSlot。
-    输出：逐元素 argv / cwd / env 键名（值脱敏）/ sandbox(声明·会话·生效·enforcement) /
+    输出：逐元素 argv / cwd / env 键名（值脱敏）/ autoEnvKeys /
           exit·signal·timedOut·durationMs / stdout·stderr /
           parse 结果 / 命中的错误码与修复建议。
     可以在工具 enabled:false 时运行（测试不要求 register），
@@ -798,7 +795,7 @@ v1 可观测性由三处承担：①`/custom-tools status` 报告当前代际、
 
 测试路径的三条硬要求：
 1. **同源代码**：`test` 与 `ToolSlot.execute` 必须调用同一个 `runCustomTool(plan, args, ctx)`，否则测过的和跑的不是一回事。
-2. **同源沙箱**：用当前会话的 `sandboxPolicy`，所以测出来的是用户真会遇到的档位。
+2. **同源环境**：与模型调用走同一套 env 收集与解释器解析，所以测出来的 argv 就是真会跑的 argv。
 3. **不写会话工具日志**：`test` 不经过 `ctx.tools.execute`，不产生 `tool/result`；只在 `/custom-tools` 自己的输出里显示。
 
 保存 Config 成功后，命令输出必须直接给出下一步：`校验通过，3 个工具就绪。下一个：/custom-tools test git_status`。
@@ -869,7 +866,7 @@ uv 工程脚本（实测 uv 0.11.2）：
 ```
 
 实测：argv 中文完好（`['0x4e2d','0x6587','0x6d4b','0x8bd5']`）、**退出码透传**（脚本 `exit 7` → uv `exit 7`）、热启动 `--no-sync` 约 0.09s。
-注意 `uv run` 首次会在项目里建 `.venv` 与 `uv.lock`，超出会话工作目录会被沙箱拒（§6.4）——先手动 `uv sync` 一次、再固定 `--no-sync` 最稳。首次带依赖会联网，`timeoutMs` 按冷启动给。
+注意 `uv run` 首次会在项目里建 `.venv` 与 `uv.lock` 并联网解析依赖——先手动 `uv sync` 一次、再固定 `--no-sync` 最稳。首次带依赖会联网，`timeoutMs` 按冷启动给。
 
 jar：
 
@@ -1025,7 +1022,7 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 
 用户决定：**保证实现简单**。技术上也正好避开一个 BLOCKER（B1）：
 
-`dsh-jobs-local/lib/index.js:439` 是 `const hooks = spec.run(handle)` —— `start()` **同步**调 `run()` 并要求**同步**返回 `{done, cancel}`；而 `confine` / `resolveExecutable` / `credentials.resolve` 全是 async。所以「先预检再在 run 里 spawn」排不出来：要么 run 变 async 直接 TypeError，要么跳过 confine 裸 spawn（违反 fail-closed）。**凡声明沙箱的工具都不能后台化**。
+`dsh-jobs-local/lib/index.js:439` 是 `const hooks = spec.run(handle)` —— `start()` **同步**调 `run()` 并要求**同步**返回 `{done, cancel}`；而 `confine` / `resolveExecutable` / `credentials.resolve` 全是 async。所以「先预检再在 run 里 spawn」排不出来：要么 run 变 async 直接 TypeError，要么跳过前沿安全检查裸 spawn。**jobs 无法复用「先异步预检、再同步 spawn」的流水线**。
 
 连带消失的问题：`JobKindMap` 合并点（应合 `'@deepseek-ai/dsh-jobs/view'`，L1）、后台 Job 与 `approval:'always'` 的硬互斥（`approval.request` 要求未结束的 turn）、以及"起了就忘"的必然体验（无 settle 通知、无 job 列表 UI）。
 
@@ -1035,7 +1032,7 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 
 ## 10. 威胁模型
 
-**可信（代码作者级）**：manifest 作者、配置管理员、manifest 中固定的 executable/interpreter/script/inline 命令、沙箱档位声明。
+**可信（代码作者级）**：manifest 作者、配置管理员、manifest 中固定的 executable/interpreter/script/inline 命令。
 **不可信**：模型生成的参数、workspace 内可被替换的文件/symlink、PATH shim、被攻陷的目标程序、进程 stdout/stderr、并发调用。
 
 | 威胁 | 缓解 |
@@ -1053,7 +1050,7 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 | 环境变量被静默吞掉 | 文档警告子串匹配会删 `MONKEY_PATH` 等 |
 | 凭据轮换延迟 | 文档写明生效 ≈ watcher debounce 窗口，不承诺"立即" |
 
-**沙箱不提供**：网络隔离、CPU/内存/PID 配额、Windows 读保密（`enforcement` 可能 `partial`）、目标程序业务副作用约束。**`read-only` ≠ 安全执行**。
+**插件不提供任何隔离**：没有网络隔离、没有 CPU/内存/PID 配额、没有读保密、没有写路径白名单（§6.4.1）。工具进程与宿主同权限——这份信任只能由「谁写的定义」承担。
 
 **关于「agent 起草草稿」（v1.1，已定延后）**：它确实是最有效的冷启动手段，但它**推翻本节的"manifest 作者 = 可信代码作者"前提**——模型从此进入信任边界，被注入的网页可诱导 agent 起草危险命令。因此闸门必须是固定的、不可配置的：草稿目录**永不执行**、确认界面**只显示最终 argv 不显示 YAML**、必须**显式勾选**、**永不自动启用**。v1 不做。
 
@@ -1115,12 +1112,12 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 
 **页面能做的（有通道）**：
 
-- 工具列表增删改：`name` / `title` / `mode` / `description` / `whenToUse` / `executable` / `interpreter` / `script` / `command` / `args` / `cwd` / `sandbox` / `approval` / `timeoutMs` / `env` / `enabled`；JSON 字符串字段（`parameters.*.default`、`examples[].args`、`output.schema`）用带解析反馈的文本框
+- 工具列表增删改：`name` / `title` / `mode` / `description` / `whenToUse` / `executable` / `interpreter` / `script` / `command` / `args` / `cwd` / `approval` / `timeoutMs` / `env` / `enabled`；JSON 字符串字段（`parameters.*.default`、`examples[].args`、`output.schema`）用带解析反馈的文本框
 - 按 `describe().schema` 的 refs 图渲染控件（`dict` / `inner` / `meta.description` 都可读）
 - 保存走 `mutate` + `revision` 冲突提示；**Host 侧仍是唯一写入者**
 - 形状错误当场显示（`settings/rejected` 的消息）+ 空数组引导卡 + 「插入 3 个示例」按钮（纯客户端常量）
 
-**页面做不到的（无通道）**：编译后的 argv 预览、真实试跑、last-good revision、effective 沙箱档位来源、上次调用与错误——这些都在 Host 内存里，浏览器读不到（§11.4）。归 `/custom-tools` 命令：
+**页面做不到的（无通道）**：编译后的 argv 预览、真实试跑、last-good revision、上次调用与错误——这些都在 Host 内存里，浏览器读不到（§11.4）。归 `/custom-tools` 命令：
 
 | 需求 | 命令 |
 |---|---|
@@ -1161,7 +1158,7 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 4. 自建 chokidar / 文件 watcher —— 方案 A 下没有文件可 watch；方案 B 里会与 HMR 队列竞态。
 5. 在 HMR 的 refresh callback 内 `runExclusive()` —— 直接抛错（`HMR transactions cannot be nested`）。
 6. 在 commit 里 `await` —— 会占住 `runReload` 的整条链，饿死模块 HMR。
-7. 把全部 Config 标 `.volatile()` —— 需重建 watcher/沙箱的字段不会触发 cleanup。
+7. 把全部 Config 标 `.volatile()` —— 需要重建后台资源的字段不会触发 cleanup。
 8. ~~依赖 `loader/volatile-update` 作为主重载机制（live Event catalog 未收录）~~ —— **已改判**：方案 A 正是靠它；源码有声明与同步 emit（§7.3），live catalog 只是没收录。M0 实测。
 9. 直接改 registry 私有结构 —— 不发规范 change，升级必碎。
 10. 定义文件用动态 `import()` —— 模块缓存/副作用/HMR 图混乱。
@@ -1169,7 +1166,7 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 12. **v1 做 preset 作用域** —— M8 会让工具静默消失。
 13. ~~v1 做 GUI 面板~~ —— **已推翻**：`settings.section` + `ctx.remote.settings` 实证可用（§11），GUI 进 v1。
 14. **自动插 `--`** —— 目标程序是否支持不可判定（F20）。
-15. **复制宿主的沙箱升级提示文案** —— 我们不支持单次升级，那句话在骗人（F9）。
+15. **假装自己有隔离** —— v1 与宿主同权限，文档和文案都不许暗示相反。
 16. **自动转义 / 模板插值** —— 见 §5。
 17. **`allowedExits` 退出码白名单** —— 用户识别不了该怎么填；只保留 Unix 约定「0 成功、非 0 失败」。非零表示正常结果的程序（`grep` 那类）包 wrapper，或让它 `exit 0` 用 JSON 承载状态（§4.2.3）。
 
@@ -1179,13 +1176,13 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **M0 spike**（1–2 天） | ① 空插件注册 1 个 tool；② volatile Config 的 `tools[]` 能被设置页读写并落盘（`research/sample/` 已验证，收敛成正式 schema 即可）；③ **Windows 沙箱硬验收**：`confine(["cmd","/c","echo","hi"])` 拿到 `enforcement:"partial"`（拿不到就先修环境，否则一切白搭——H3 是永久缓存）；④ 实测 JSON 字符串字段能往返 `mutate`/`describe`；⑤ 实测保存后 `loader/volatile-update` 真的到达 listener；⑥ 实测 `ctx.sandboxPolicy.resolve({})` 在真实会话里给出的 mode 符合预期 | 六条都过 |
+| **M0 spike**（1–2 天） | ① 空插件注册 1 个 tool；② volatile Config 的 `tools[]` 能被设置页读写并落盘（`research/sample/` 已验证，收敛成正式 schema 即可）；③ 实测 JSON 字符串字段能往返 `mutate`/`describe`；④ 实测保存后 `loader/volatile-update` 真的到达 listener | 四条都过 |
 | **M1 骨架** | Config schema + `.check()` 跨字段校验 + Manager + Generation + ToolSlot + 同步 commit + 回滚 + 指针诊断 | Config 里写坏一个工具，其他工具照常可用、旧版保留；注入抛错的 `tools/change` listener 后不残留注册 |
-| **M2 执行 + 预览 + 试跑** | §6 流水线（含 H4 短路 / H5 收紧 / 沙箱双判据 / 自建 abort）+ 统一输出 schema + `/custom-tools preview` + `/custom-tools test` | **`/custom-tools test` 跑通 3 个示例** |
+| **M2 执行 + 预览 + 试跑** | §6 流水线（含自建 abort 与 terminate+waitForExit）+ 统一输出 schema + `/custom-tools preview` + `/custom-tools test` | **`/custom-tools test` 跑通 3 个示例** |
 | **M3 四模式** | executable / script（双轨+hash）/ bash inline / pwsh inline + stdin raw/json + 完整 mapper | 四个模式各一个可跑样例 |
 | **M4 设置页** | `settings.section` 页面：列表增删改、按 `describe().schema` 渲染、`mutate` 保存 + revision 冲突 + 引导卡与示例按钮 | 不碰命令行，纯靠页面加一个工具并保存成功 |
 | **M5 命令族补全** | `/custom-tools list/show/status/enable/disable` + last-good 与诊断呈现 + 在途预警 | 不看文档能完成"加一个工具并测通" |
-| **M6 加固** | 威胁模型逐项测试、Windows partial 沙箱、Git Bash 兼容、secret 只能走 credential ref 的文档与 lint | 可发布 |
+| **M6 加固** | 威胁模型逐项测试、Windows 解释器探测与回退、secret 只能走 credential ref 的文档与 lint | 可发布 |
 
 **当前不做**：Jobs（§9）、preset 作用域（§8）、agent 起草闸门（§10）。
 
@@ -1201,7 +1198,7 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 | Jobs | **不进 v1**，理由见 §9（实现简单 + B1 BLOCKER） |
 | agent 起草草稿 | **做，但不在 v1**（v1.1），闸门固定不可配置（§10） |
 | 测试功能 | **v1 一等公民**：`preview` 与 `test` 同源走真实流水线（§6.6） |
-| 默认沙箱 | **`workspace-write`**，且 manifest 只能收紧不能放宽（§6.4） |
+| 执行权限 | **与宿主同权限，无 confinement**（§6.4.1）；模型参数改不了程序、目录、环境键 |
 | v1 范围 | 单 bundle（Host 半侧 + 一个 Client 半侧）；全局作用域；**定义存 Config**；设置分页 + `/custom-tools` 命令族 |
 | **GUI 面板** | **已推翻"v1 无面板"**：`settings.section` + `ctx.remote.settings` 已实证可用（§11），不需要 Typert 生成、不需要自建 HTTP。面板进 v1 |
 | **定义存放位置** | **方案 A，已拍板**：工具定义住插件 Config 的 `tools[]`（§3），UI/持久化/锁/校验/revision 全免费，volatile 变更不 remount → 热更新天然成立。独立 `tools.yaml` 方案作废 |

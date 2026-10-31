@@ -6,15 +6,20 @@ may fill, and it shows up as a normal agent tool — with hot reload, hot enable
 settings page.
 
 The point is **narrowing, not widening**. `bash` already lets the agent run anything. A custom tool
-turns "anything" into "exactly this program, with exactly these arguments, in exactly this sandbox".
+turns "anything" into "exactly this program, with exactly these arguments, in exactly this
+directory".
+
+Tools run with the privileges of the harness itself. There is no confinement layer in the plugin:
+local programs expect to read their own config and write their own caches, and reshaping them to
+fit a sandbox is not what this plugin is for. You write the definition, so you own the behaviour.
 
 ## What it guarantees
 
 | Concern | Behaviour |
 | --- | --- |
 | Argument passing | The model's values become **exact argv elements** or **stdin bytes**. They are never interpolated into shell source. |
-| Sandbox | The declared level can only *tighten* the session's level. A confined session never runs your tool unconfined; a missing sandbox is a failure, not a fallback. |
 | Approval | `inherit` (session policy decides) or `always` (every call asks). There is no "always allow". |
+| Privileges | Runs as the harness runs. No argument can change which program starts, from which directory, or with which environment keys. |
 | Output | Exit code `0` is the only success. stdout is the result; a failure carries a stable code, a message and a hint. |
 | Reload | Editing the config recompiles in place. Compatible edits swap definitions without touching the registry; breaking edits cancel in-flight calls, drain, then re-register. A definition that fails validation keeps its previous version serving. |
 
@@ -61,39 +66,11 @@ args: [{ stdin: 'json' }]
 mode: bash
 executable: C:/Program Files/Git/bin/bash.exe
 command: 'printf "%s\n" "$@"'
-sandbox: danger-full-access
 ```
 
-**Confined bash on Windows runs one specific runtime.** An ordinary bash on
-Windows is an MSYS2/Cygwin build, and that POSIX runtime cannot initialise inside
-the Windows write-restricted token: it dies creating its signal pipe or
-`\BaseNamedObjects\msys-2.0*` before it ever parses argv — in `read-only` and
-`workspace-write` mode alike. This is not a `bash`-specific quirk: `ls.exe` from
-the same installation fails identically, while the mingw-native `git.exe` runs
-fine.
-
-The exception is the payload `dsh-ops` ships: a pinned MSYS build plus two IPC
-compatibility proxies, staged under
-`%USERPROFILE%\.dsh\dsh-ops\bash-ipc\<identity>\`. That one starts inside the
-restricted token, and confinement still holds (verified with real writes: the
-workspace and the runner's temp are writable, everything outside is denied). So
-when a `mode: bash` tool leaves `executable` unset and the call will be confined,
-the plugin runs that staged bash — with the staged directories leading `PATH`,
-because an inherited `PATH` resolves external commands to a different, unpinned
-tree that dies the same way.
-
-- If the staged payload is missing, the call fails with `BASH_SANDBOX_UNSUPPORTED`
-  telling the model to widen the tier or switch to `powershell`/`executable`.
-- An explicitly pinned `executable` always wins: it is never silently swapped for
-  the staged bash, and pinning an ordinary bash in a confined tier fails the same
-  way. Pin + `sandbox: danger-full-access`, or leave `executable` empty.
-- On macOS and Linux `bash` runs confined as usual.
-
-Also worth knowing: `bash` on `PATH` is usually `C:\Windows\System32\bash.exe`,
-the WSL launcher, which answers with a UTF-16LE `Bash/E_ACCESSDENIED` instead of
-running anything. In a `danger-full-access` tier, when a `mode: bash` tool leaves
-`executable` unset and `bash` resolves to that launcher or to the Microsoft Store
-alias, the plugin looks for a real bash in this order, derived only from the
+`bash` on `PATH` is usually `C:\Windows\System32\bash.exe` — the WSL launcher, which is not a Unix
+shell. When a `mode: bash` tool leaves `executable` unset and `bash` resolves to that launcher or to
+the Microsoft Store alias, the plugin looks for a real bash in this order, derived only from the
 deployment environment:
 
 1. `<git>/bin/bash.exe` next to the `git` on `PATH`, then `<git>/usr/bin/bash.exe`
@@ -102,17 +79,15 @@ deployment environment:
 4. `%LOCALAPPDATA%\Programs\Git`, `%MSYS2_ROOT%`
 5. `C:\msys64\usr\bin\bash.exe`
 
-If none of them exists the call fails with `EXECUTABLE_NOT_FOUND` and says which
-bash is missing. A model argument never influences this choice, and an explicit
-`executable` always wins.
+If none of them exists the call fails with `EXECUTABLE_NOT_FOUND` and says which bash is missing. A
+model argument never influences this choice, and an explicit `executable` always wins.
 
-`mode: powershell` defaults to `pwsh` and falls back to `powershell.exe`
-(Windows PowerShell 5.1) when PowerShell 7 is not installed. Parameters always
-travel as one JSON document on stdin (`{ stdin: 'json' }`), never as trailing
-argv: `powershell -Command <source> a b` appends `a`/`b` to the command text
-instead of binding them to `$args` (measured, and the reason validation rejects
-positional bindings in this mode). `/custom-tools preview <name> --param k=v`
-prints the absolute path that will actually run.
+`mode: powershell` defaults to `pwsh` and falls back to `powershell.exe` (Windows PowerShell 5.1)
+when PowerShell 7 is not installed. Parameters always travel as one JSON document on stdin
+(`{ stdin: 'json' }`), never as trailing argv: `powershell -Command <source> a b` appends `a`/`b`
+to the command text instead of binding them to `$args` (measured, and the reason validation rejects
+positional bindings in this mode). `/custom-tools preview <name> {"k":"v"}` prints the absolute path
+that will actually run.
 
 ## Parameters and argv
 
@@ -141,7 +116,7 @@ starting with `-` or `@` are rejected unless the entry sets `allowLeadingDash` o
 /custom-tools list
 /custom-tools status
 /custom-tools show <name>
-/custom-tools preview <name> {"query":"dsh"}   # prints argv, cwd, sandbox — runs nothing
+/custom-tools preview <name> {"query":"dsh"}   # prints argv and cwd — runs nothing
 /custom-tools test <name> {"query":"dsh"}      # same pipeline as a model call
 /custom-tools enable|disable <name>
 /custom-tools add <json>                       # whole definition, validated before it is written
@@ -150,7 +125,7 @@ starting with `-` or `@` are rejected unless the entry sets `allowLeadingDash` o
 
 [folder `examples/`](examples/) ships five definitions you can paste straight into `add`: a fixed
 executable, an `rg` search with a parameter, a script with a fixed interpreter, a PowerShell snippet
-whose parameters land in `$args`, and a `parse: "json"` tool with an output schema. The test suite
+whose parameters arrive on stdin, and a `parse: "json"` tool with an output schema. The test suite
 validates and compiles all of them, so they cannot drift from the real schema.
 
 `preview` is the fastest way to find out why a tool isn't doing what you meant: it shows the exact
@@ -160,9 +135,9 @@ argv the model's arguments would produce.
 
 `INVALID_CONFIG`, `INVALID_ARGUMENT`, `TOOL_RELOADING`, `CREDENTIAL_UNAVAILABLE`,
 `APPROVAL_REJECTED`, `APPROVAL_UNAVAILABLE`, `CWD_UNAVAILABLE`, `SCRIPT_UNAVAILABLE`,
-`EXECUTABLE_NOT_FOUND`, `SPAWN_FAILED`, `SANDBOX_UNAVAILABLE`, `ABORTED`, `TIMED_OUT`,
-`SANDBOX_DENIED`, `BASH_SANDBOX_UNSUPPORTED`, `PROCESS_EXIT`, `PROCESS_SIGNALED`, `OUTPUT_LIMIT`, `INVALID_JSON_OUTPUT`,
-`OUTPUT_SCHEMA_MISMATCH`, `CUSTOM_TOOL_INTERNAL`.
+`EXECUTABLE_NOT_FOUND`, `SPAWN_FAILED`, `ABORTED`, `TIMED_OUT`, `PROCESS_EXIT`,
+`PROCESS_SIGNALED`, `OUTPUT_LIMIT`, `INVALID_JSON_OUTPUT`, `OUTPUT_SCHEMA_MISMATCH`,
+`CUSTOM_TOOL_INTERNAL`.
 
 Text is UTF-8 in both directions; Python and Java get their usual encoding defaults injected
 (`PYTHONIOENCODING=utf-8`, `-Dfile.encoding=UTF-8`) unless you override them.
@@ -170,13 +145,13 @@ Text is UTF-8 in both directions; Python and Java get their usual encoding defau
 ## Scope of v1
 
 Not included, on purpose: background jobs, preset-scoped tools, agent-authored drafts, disk-backed
-call history, output spill files. `OUTPUT_LIMIT` fails loudly instead of handing back a partial
-result.
+call history, output spill files, and any sandbox of its own. `OUTPUT_LIMIT` fails loudly instead of
+handing back a partial result.
 
 ## Development
 
 ```
-node --test        # 44 tests, no profile required
+node --test        # 64 tests, no profile required
 ```
 
 The design notes and the runtime evidence behind every contract in this README live in

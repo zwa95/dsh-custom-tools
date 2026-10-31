@@ -170,7 +170,6 @@ export class Manager {
       registered: this.slots.get(entry.plan.name)?.active === true,
       concurrency: entry.plan.concurrency,
       timeoutMs: entry.plan.timeoutMs,
-      sandbox: entry.plan.sandbox,
       approval: entry.plan.approval,
     }))
   }
