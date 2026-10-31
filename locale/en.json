@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Custom Tools",
+    "description": "Declare local executables, scripts and fixed shell commands as Agent tools."
+  }
+}

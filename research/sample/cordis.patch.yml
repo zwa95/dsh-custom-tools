@@ -1,0 +1,13 @@
+# Three rows:
+#   cts-bundle : bare-name row (carries the browser half), no Config -> no page
+#   cts-auto   : volatile Config, NO custom page  -> auto-generated form
+#   cts-page   : volatile Config + custom page    -> hand-written React form
+- insert:
+    - id: cts-bundle
+      name: dsh-custom-tools-sample
+    - id: cts-auto
+      name: dsh-custom-tools-sample/auto
+    - id: cts-page
+      name: dsh-custom-tools-sample/page
+    - id: cts-section
+      name: dsh-custom-tools-sample/section

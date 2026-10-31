@@ -1,0 +1,50 @@
+{
+  "name": "dsh-custom-tools-sample",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Minimal samples of the two DSH plugin settings-UI mechanisms (auto form vs. custom page)",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./auto": "./auto.js",
+    "./page": "./page.js",
+    "./section": "./section.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "auto.js",
+    "page.js",
+    "section.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale",
+    "icon.svg"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    },
+    "engines": {
+      "dsh": ">=0.2.0-rc.2"
+    }
+  }
+}

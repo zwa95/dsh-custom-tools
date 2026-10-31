@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>自定义工具 · 设置</title>
+<style>
+  :root{
+    --bg-base:#14161a; --bg-layer1:#191c21; --bg-layer2:#1f2329; --bg-overlay:#262b33;
+    --border-l1:#2b3138; --border-l2:#3a424b;
+    --text:#e6e9ee; --text-2:#a9b2bd; --text-3:#7b858f;
+    --brand:#5b9cf8; --ok:#4ec98a; --warn:#e2b33c; --err:#ef6b6b;
+    --radius-xs:4px; --radius-sm:8px; --radius-md:12px; --radius-lg:16px; --radius-xl:20px;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none !important}
+  html,body{margin:0;background:var(--bg-base);color:var(--text);
+    font:13px/1.55 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .mono{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
+  .wrap{max-width:920px;margin:0 auto;padding:18px 20px 64px}
+
+  .top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .top .t1{font-size:16px;font-weight:600;letter-spacing:.01em}
+  .top .grow{flex:1}
+  .chip{font-size:11px;color:var(--text-3);border:1px solid var(--border-l1);
+    border-radius:999px;padding:1px 9px;background:var(--bg-layer1)}
+  .chip.dirty{color:var(--warn);border-color:#4a3d1c;background:#241f12}
+  .chip.bad{color:var(--err);border-color:#4a2626;background:#241717}
+
+  .btn{font:inherit;font-size:12px;color:var(--text);background:var(--bg-layer2);
+    border:1px solid var(--border-l2);border-radius:var(--radius-sm);padding:6px 12px;cursor:pointer}
+  .btn:hover{background:var(--bg-overlay)}
+  .btn:disabled{opacity:.45;cursor:default}
+  .btn.primary{color:var(--brand);border-color:#31527d;background:#16202e}
+  .btn.primary:hover{background:#1a2738}
+  .btn.sm{font-size:11.5px;padding:4px 9px}
+  .btn.addbtn{width:100%;margin-top:10px;padding:10px;color:var(--text-2);
+    border-style:dashed;background:transparent}
+  .btn.addbtn:hover{color:var(--text);border-color:var(--border-l2);background:var(--bg-layer1)}
+
+  .banner{margin:0 0 14px;padding:10px 12px;border-radius:var(--radius-md);font-size:12.5px;
+    display:flex;align-items:center;gap:10px;border:1px solid var(--border-l2);background:var(--bg-layer1)}
+  .banner.ok{border-color:#25412f;background:#152219}
+  .banner.err{border-color:#4a2626;background:#241717}
+  .banner .grow{flex:1}
+
+  .card{border:1px solid var(--border-l1);border-radius:var(--radius-xl);
+    background:var(--bg-layer1);margin-bottom:10px;overflow:hidden}
+  .card.open{border-color:var(--border-l2)}
+  .card.bad .cname{color:var(--err)}
+  .chead{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;user-select:none}
+  .chead:hover{background:var(--bg-layer2)}
+  .twist{width:14px;color:var(--text-3);font-size:9px;transition:transform .12s}
+  .card.open .twist{transform:rotate(90deg)}
+  .cname{font-size:13.5px;font-weight:600;font-family:ui-monospace,Consolas,monospace}
+  .chead .grow{flex:1}
+  .switch{position:relative;width:34px;height:18px;flex:none}
+  .switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+  .switch i{position:absolute;inset:0;border-radius:999px;background:var(--bg-overlay);
+    border:1px solid var(--border-l2);transition:.15s}
+  .switch i::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;
+    border-radius:50%;background:var(--text-3);transition:.15s}
+  .switch input:checked + i{background:#1d3a54;border-color:#31527d}
+  .switch input:checked + i::after{transform:translateX(16px);background:var(--brand)}
+  .dots{width:26px;height:26px;border-radius:var(--radius-sm);border:1px solid transparent;
+    background:transparent;color:var(--text-3);cursor:pointer;font-size:15px;line-height:1}
+  .dots:hover{background:var(--bg-overlay);color:var(--text);border-color:var(--border-l2)}
+  .menu{position:absolute;z-index:20;min-width:120px;padding:4px;border-radius:var(--radius-sm);
+    background:var(--bg-overlay);border:1px solid var(--border-l2);box-shadow:0 8px 24px #0008}
+  .menu button{display:block;width:100%;text-align:left;font:inherit;font-size:12px;padding:6px 10px;
+    background:transparent;border:0;border-radius:var(--radius-xs);color:var(--text);cursor:pointer}
+  .menu button:hover{background:var(--bg-layer1)}
+  .menu button.danger{color:var(--err)}
+
+  .cbody{padding:2px 14px 14px;border-top:1px solid var(--border-l1)}
+
+  .panel{padding:12px 0;border-bottom:1px solid var(--border-l1)}
+  .panel:last-child{border-bottom:0;padding-bottom:4px}
+  .ph{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  .ph .t{font-size:12px;font-weight:600;color:var(--text-2);letter-spacing:.02em}
+  .ph .meta{font-size:11px;color:var(--text-3)}
+  .ph .grow{flex:1}
+
+  .fld{margin-bottom:9px}
+  .fld:last-child{margin-bottom:0}
+  .fld > label{display:block;font-size:11px;color:var(--text-3);margin-bottom:4px}
+  .fld .help{font-size:11px;color:var(--text-3);margin-top:4px}
+  input[type=text],input[type=number],select,textarea{width:100%;font:inherit;font-size:12.5px;
+    color:var(--text);background:var(--bg-base);border:1px solid var(--border-l1);
+    border-radius:var(--radius-sm);padding:6px 9px;outline:none}
+  input[type=text]:focus,input[type=number]:focus,select:focus,textarea:focus{border-color:#31527d}
+  textarea{resize:vertical;line-height:1.6}
+  select{cursor:pointer}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+
+  .seg{display:inline-flex;border:1px solid var(--border-l1);border-radius:var(--radius-sm);overflow:hidden}
+  .seg button{font:inherit;font-size:11.5px;padding:4px 11px;background:transparent;border:0;
+    color:var(--text-3);cursor:pointer;border-right:1px solid var(--border-l1)}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:#16202e;color:var(--brand)}
+
+  .tokens{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+  .tok{display:flex;flex-direction:column;gap:1px;border:1px solid var(--border-l1);
+    border-radius:var(--radius-sm);padding:4px 8px;background:var(--bg-base)}
+  .tok .v{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;white-space:pre-wrap;
+    word-break:break-all;max-width:320px;color:#b9c6d6}
+  .tok .k{font-size:9px;letter-spacing:.04em;color:var(--text-3);text-transform:uppercase}
+  .tok.t-val{border-color:#2f4a36} .tok.t-val .v{color:var(--ok)} .tok.t-val .k{color:#5f9d76}
+  .tok.t-gate{border-color:#3d3350} .tok.t-gate .v{color:#c79bf0} .tok.t-gate .k{color:#8b6fb0}
+  .tok .ph{color:inherit;opacity:.55}
+
+  .diag{list-style:none;margin:8px 0 0;padding:0;font-size:11.5px}
+  .diag li{display:flex;gap:7px;padding:3px 0;color:var(--err)}
+  .diag li.ok{color:var(--ok)}
+  .diag .x{flex:none;opacity:.85}
+
+  .tbl{width:100%;border-collapse:collapse;font-size:12px}
+  .tbl th{text-align:left;font-weight:500;font-size:10.5px;color:var(--text-3);
+    text-transform:uppercase;letter-spacing:.04em;padding:0 6px 5px}
+  .tbl td{padding:2px 6px}
+  .tbl td input.nm{min-width:90px;font-weight:500}
+  .tbl tr.unused .nm{color:var(--warn)}
+  .tbl input[type=text],.tbl select{padding:4px 7px;font-size:12px}
+  .tbl .cb{text-align:center}
+  .tbl .cb input{width:13px;height:13px;cursor:pointer}
+  .del{width:22px;height:22px;border-radius:var(--radius-xs);border:1px solid transparent;
+    background:transparent;color:var(--text-3);cursor:pointer;font-size:14px;line-height:1}
+  .del:hover{color:var(--err);border-color:#4a2626;background:#241717}
+  .tag{font-size:10px;color:var(--warn);border:1px solid #4a3d1c;border-radius:999px;padding:0 6px;margin-left:6px}
+
+  .argv{display:flex;flex-wrap:wrap;gap:5px;padding:9px;border:1px solid var(--border-l1);
+    border-radius:var(--radius-sm);background:var(--bg-base);margin-top:9px}
+  .av{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;padding:2px 7px;
+    border:1px solid var(--border-l1);border-radius:var(--radius-xs);white-space:pre-wrap;
+    word-break:break-all;max-width:100%}
+  .av.exe{color:#9fd0ff;border-color:#2c4a68;background:#182533;font-weight:600}
+  .av.val{color:var(--ok);border-color:#2f4a36}
+  .av.sw{color:#c79bf0;border-color:#3d3350}
+  .av.env{color:#e0b060;border-color:#5a4527;background:#2a2318}
+  .chk{display:flex;align-items:center;gap:10px;margin-top:7px}
+  .chkout{font-size:11.5px;color:var(--muted);line-height:1.4}
+  .chkout.ok{color:var(--ok)}
+  .chkout.bad{color:var(--err)}
+
+  /* 代码编辑器：pre 高亮层 + 透明 textarea */
+  .ed{position:relative;border:1px solid var(--border-l2);border-radius:var(--radius-sm);background:var(--bg-base)}
+  .ed:focus-within{border-color:#31527d}
+  .ed pre.hl,.ed textarea{margin:0;padding:8px 10px;font:12px/1.6 ui-monospace,Consolas,"Cascadia Mono",monospace;
+    white-space:pre-wrap;word-break:break-word;border:0;tab-size:2}
+  .ed pre.hl{position:absolute;inset:0;overflow:hidden;pointer-events:none;color:var(--text)}
+  .ed textarea{position:relative;width:100%;display:block;background:transparent;
+    color:transparent;-webkit-text-fill-color:transparent;caret-color:var(--text);resize:vertical;outline:none}
+  .ed textarea::placeholder{color:var(--text-3);-webkit-text-fill-color:var(--text-3)}
+  .hl .c{color:#6d7683;font-style:italic}
+  .hl .s{color:#8fce7a}
+  .hl .v{color:#e0b060}
+  .hl .k{color:#c79bf0}
+  .hl .n{color:#7fb2ff}
+
+  /* 路径字段：输入 + 选择 */
+  .pathrow{display:flex;gap:6px}
+  .pathrow input{flex:1;min-width:0}
+  .picknote{color:var(--warn)}
+
+  .out{margin-top:9px;padding:10px;border:1px solid var(--border-l1);border-radius:var(--radius-sm);
+    background:var(--bg-base);font-family:ui-monospace,Consolas,monospace;font-size:11.5px;
+    white-space:pre-wrap;word-break:break-all;line-height:1.65;max-height:220px;overflow:auto;
+    color:var(--text-2)}
+  .out .m{color:var(--text-3)}
+  .out .okl{color:var(--ok)}
+  .out .errl{color:var(--err)}
+  .note{font-size:11px;color:var(--text-3);margin-top:7px}
+  .empty{padding:28px 16px;text-align:center;color:var(--text-3);border:1px dashed var(--border-l2);
+    border-radius:var(--radius-xl)}
+  .empty p{margin:0 0 12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <span class="t1">自定义工具</span>
+    <span class="chip" id="revChip">revision 42</span>
+    <span class="grow"></span>
+    <button class="btn" id="btnRevert">放弃修改</button>
+    <button class="btn primary" id="btnSave">保存</button>
+  </div>
+  <div class="banner" id="banner" hidden></div>
+  <div id="cards"></div>
+  <button class="btn addbtn" id="btnAdd">＋ 新增工具</button>
+</div>
+
+<script>
+/* ============================================================
+   state
+   ============================================================ */
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const $ = (s) => document.querySelector(s);
+
+let uid = 0;
+const nid = () => "t" + (++uid);
+
+const MODES = [["executable", "可执行文件"], ["script", "脚本"], ["bash", "Bash"], ["powershell", "PowerShell"]];
+const TYPES = [["string", "文本"], ["number", "数字"], ["boolean", "开关"], ["enum", "枚举"]];
+
+function P(type, description, extra) {
+  return Object.assign({ type: type || "string", required: true, description: description || "", choices: [] }, extra || {});
+}
+function newTool(o) {
+  return Object.assign({
+    id: nid(), name: "", enabled: true, mode: "executable", description: "",
+    executable: "", interpreter: "", scriptPath: "", command: "",
+    template: "", params: {}, order: [],
+    cwd: "", timeoutMs: 120000, sandbox: "workspace-write",
+    approval: "auto", encoding: "auto", parse: "text",
+    calls: 0, lastUsed: "从未调用", lastError: null,
+  }, o || {});
+}
+
+const state = {
+  revision: 42, dirty: false, conflict: false,
+  openId: null,
+  tools: [
+    newTool({
+      id: "t1", name: "gauss_query",
+      description: "查询 Gauss 数据库（只读账号），返回 CSV。",
+      mode: "executable", executable: "C:\\tools\\gauss-query.cmd",
+      template: "--format=csv --sql $sql$ --limit $limit$",
+      order: ["sql", "limit"],
+      params: {
+        sql: P("string", "要执行的 SQL，仅允许 select"),
+        limit: P("number", "最多返回行数"),
+      },
+      calls: 12, lastUsed: "2 小时前",
+    }),
+    newTool({
+      id: "t2", name: "im_send",
+      description: "向测试群发送 IM 消息。",
+      mode: "executable", executable: "C:\\tools\\imsend.exe",
+      template: "--to $to$ --text $text$ --dry-run$dryRun$",
+      order: ["to", "text", "dryRun"],
+      params: {
+        to: P("string", "收件人"),
+        text: P("string", "消息正文"),
+        dryRun: P("boolean", "只渲染不发送"),
+      },
+      approval: "always", calls: 3, lastUsed: "昨天",
+    }),
+    newTool({
+      id: "t3", name: "erp_sync",
+      description: "把本地 CSV 同步到 ERP。",
+      mode: "bash",
+      command: 'set -euo pipefail\ncd /c/work\n./sync.sh --file "$1" --env "$2"',
+      template: "$file$ $env$",
+      order: ["file", "env"],
+      params: {
+        file: P("string", "CSV 路径"),
+        env: P("enum", "目标环境", { choices: ["staging", "prod"] }),
+      },
+      enabled: false,
+      lastError: { code: "PROCESS_EXIT", at: "今天 09:12", detail: "exit 2 · sync.sh: line 4: jq: command not found" },
+      calls: 7, lastUsed: "今天 09:12",
+    }),
+  ],
+};
+
+const SEED = clone(state.tools);
+let snapshot = null;
+const TEST = {};              // toolId -> { 参数名: 值 }；仅运行测试使用，不落盘
+
+/* ============================================================
+   模板解析：$名字$
+   ============================================================ */
+function tokenize(text) {
+  const errors = [];
+  const tokens = [];
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    while (i < n && /\s/.test(text[i])) i++;
+    if (i >= n) break;
+    const parts = [];
+    let lit = "";
+    let quote = null;
+    let started = false;
+    const pushLit = () => { if (lit) { parts.push({ t: "lit", text: lit }); lit = ""; } };
+    while (i < n) {
+      const c = text[i];
+      if (quote) {
+        if (c === quote) { quote = null; i++; continue; }
+        lit += c; i++; started = true; continue;
+      }
+      if (c === '"' || c === "'") { quote = c; i++; started = true; continue; }
+      if (/\s/.test(c)) break;
+      if (c === "$") {
+        const m = /^([A-Za-z_][A-Za-z0-9_]*)\$/.exec(text.slice(i + 1));
+        if (m) { pushLit(); parts.push({ t: "ph", name: m[1] }); i += m[1].length + 2; started = true; continue; }
+        lit += c; i++; started = true; continue;
+      }
+      lit += c; i++; started = true;
+    }
+    if (quote) errors.push("有引号没有闭合。");
+    pushLit();
+    if (started) tokens.push({ parts: parts });
+  }
+  const seen = [];
+  tokens.forEach((tk, idx) => {
+    const phs = tk.parts.filter((p) => p.t === "ph");
+    if (phs.length > 1)
+      errors.push("第 " + (idx + 1) + " 段有 " + phs.length + " 个占位符（" + phs.map((p) => "$" + p.name + "$").join(" + ") + "），每段最多一个。");
+    phs.forEach((p) => { if (!seen.includes(p.name)) seen.push(p.name); });
+  });
+  return { tokens: tokens, errors: errors, usedInOrder: seen };
+}
+/* 参数只由用户显式创建（＋ 参数）。模板里的 $x$ 不会自动建行，
+   页面只负责把「未声明」和「未引用」两类不一致报出来。 */
+function missingParams(t, parsed) {
+  return parsed.usedInOrder.filter((n) => !t.params[n]);
+}
+function unusedParams(t, parsed) {
+  return Object.keys(t.params).filter((n) => !parsed.usedInOrder.includes(n));
+}
+function paramNames(t, parsed) {
+  const used = parsed.usedInOrder.filter((n) => t.params[n]);
+  return used.concat(Object.keys(t.params).filter((n) => !used.includes(n)));
+}
+function renameParam(t, from, to) {
+  const nn = String(to || "").trim();
+  if (!nn || nn === from) return false;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(nn)) return false;
+  if (t.params[nn]) return false;
+  const next = {};
+  Object.keys(t.params).forEach((k) => { next[k === from ? nn : k] = t.params[k]; });
+  t.params = next;
+  t.template = String(t.template || "").replace(
+    new RegExp("\\$" + from + "\\$", "g"), () => "$" + nn + "$");
+  if (TEST[t.id]) {
+    const v = TEST[t.id];
+    if (from in v) { const old = v[from]; delete v[from]; v[nn] = old; }
+  }
+  return true;
+}
+function diagnostics(t, parsed) {
+  const d = parsed.errors.slice();
+  missingParams(t, parsed).forEach((n) => d.push("参数 $" + n + "$ 未声明，点「＋ 参数」添加。"));
+  unusedParams(t, parsed).forEach((n) => d.push("参数 " + n + " 未在参数模板中引用。"));
+  parsed.tokens.forEach((tk, idx) => {
+    const ph = tk.parts.find((p) => p.t === "ph");
+    if (!ph) return;
+    const p = t.params[ph.name];
+    if (!p) return;
+    if (p.type === "boolean" && tk.parts.length === 1)
+      d.push("第 " + (idx + 1) + " 段只有 $" + ph.name + "$；开关应写成 --flag$" + ph.name + "$。");
+  });
+  return d;
+}
+
+/* ============================================================
+   展开 / 参数默认值
+   ============================================================ */
+function shellExe(t) {
+  return t.interpreter || (t.mode === "bash" ? "bash" : "pwsh");
+}
+function progLine(t) {
+  if (t.mode === "executable") return t.executable || "（未填可执行文件）";
+  if (t.mode === "script") return [t.interpreter || "（未填解释器）", t.scriptPath || "（未填脚本）"].join(" ");
+  if (t.mode === "bash") return shellExe(t) + " --noprofile --norc -c <脚本> dsh-custom-tool";
+  return shellExe(t) + " -NoLogo -NoProfile -NonInteractive -Command <脚本>";
+}
+/* 脚本语法高亮：粗粒度着色，只做防呆 */
+const KW = {
+  bash: new Set(["if", "then", "else", "elif", "fi", "for", "in", "do", "done", "while", "until",
+    "case", "esac", "function", "return", "local", "export", "readonly", "set", "shift", "source",
+    "trap", "echo", "printf", "exit"]),
+  powershell: new Set(["if", "else", "elseif", "foreach", "for", "while", "do", "until", "function",
+    "param", "return", "switch", "try", "catch", "finally", "throw", "begin", "process", "end", "filter"]),
+};
+function strHTML(raw, q) {
+  if (q !== '"')
+    return '<span class="s">' + esc(raw) + "</span>";
+  /* 双引号内再对 $var 着色（bash / PowerShell 都会展开） */
+  const parts = raw.split(/(\$(?:\{[^}]*\}|\([^)]*\)|[A-Za-z_][A-Za-z0-9_:]*|[0-9@*#?!$-]))/);
+  return parts.map((p, i) =>
+    i % 2 === 1 ? '<span class="v">' + esc(p) + "</span>" : (p ? '<span class="s">' + esc(p) + "</span>" : "")
+  ).join("");
+}
+function hlScript(code, mode) {
+  const kw = KW[mode === "powershell" ? "powershell" : "bash"];
+  const src = String(code || "");
+  let out = "", i = 0;
+  const span = (cls, txt) => '<span class="' + cls + '">' + esc(txt) + "</span>";
+  while (i < src.length) {
+    const c = src[i];
+    if (c === "#") {
+      let j = src.indexOf("\n", i); if (j < 0) j = src.length;
+      out += span("c", src.slice(i, j)); i = j; continue;
+    }
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < src.length) {
+        if (src[j] === "\\") { j += 2; continue; }
+        if (src[j] === c) { j++; break; }
+        j++;
+      }
+      out += strHTML(src.slice(i, j), c); i = j; continue;
+    }
+    if (c === "$") {
+      const m = /^\$(\{[^}]*\}|\([^)]*\)|[A-Za-z_][A-Za-z0-9_:]*|[0-9@*#?!$-])/.exec(src.slice(i));
+      if (m) { out += span("v", m[0]); i += m[0].length; continue; }
+    }
+    if (/[A-Za-z_]/.test(c)) {
+      const m = /^[A-Za-z_][A-Za-z0-9_-]*/.exec(src.slice(i));
+      const w = m[0];
+      out += kw.has(w.toLowerCase()) ? span("k", w) : esc(w);
+      i += w.length; continue;
+    }
+    if (/[0-9]/.test(c)) {
+      const m = /^[0-9]+/.exec(src.slice(i));
+      out += span("n", m[0]); i += m[0].length; continue;
+    }
+    out += esc(c); i++;
+  }
+  return out;
+}
+/* 路径字段：绝对路径或 PATH 中的名字；带分隔符的相对路径不可用 */
+function pathProblem(v) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  const hasSep = /[\\/]/.test(s);
+  const abs = /^[A-Za-z]:[\\/]/.test(s) || s.startsWith("/") || s.startsWith("\\\\");
+  if (hasSep && !abs) return "带分隔符的相对路径不可用";
+  return "";
+}
+function pathField(t, field, label, placeholder, help, pickLabel) {
+  return '<div class="fld"><label>' + label + "</label>" +
+    '<div class="pathrow"><input type="text" class="mono" data-bind="' + field + '" value="' + esc(t[field]) +
+      '" placeholder="' + esc(placeholder) + '">' +
+      '<button class="btn sm" data-pick="' + field + '">' + (pickLabel || "选择…") + "</button></div>" +
+    (help ? '<div class="help">' + help + "</div>" : "") + "</div>";
+}
+function checkSyntax(t) {
+  const s = String(t.command || "");
+  if (!s.trim()) return { ok: false, msg: "脚本为空" };
+  const lines = s.split(/\r?\n/);
+  let sq = 0, dq = 0;
+  const heredocs = [];
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    for (let j = 0; j < ln.length; j++) {
+      const c = ln[j];
+      if (c === "\\") { j++; continue; }
+      if (c === "'" && dq % 2 === 0) sq++;
+      else if (c === '"' && sq % 2 === 0) dq++;
+      else if (c === "#" && sq % 2 === 0 && dq % 2 === 0) break;
+    }
+    const hd = ln.match(/<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/);
+    if (hd) heredocs.push(hd[1]);
+    else if (heredocs.length && ln.trim() === heredocs[heredocs.length - 1]) heredocs.pop();
+    if (/\\(?:\r?$)/.test(ln)) return { ok: false, msg: "第 " + (i + 1) + " 行：行尾孤立反斜杠" };
+  }
+  if (sq % 2) return { ok: false, msg: "单引号未闭合" };
+  if (dq % 2) return { ok: false, msg: "双引号未闭合" };
+  if (heredocs.length) return { ok: false, msg: "here-doc 未闭合：" + heredocs.join(" ") };
+  return { ok: true, msg: "本地粗检通过；语法校验需 Host 侧执行 " + (t.mode === "bash" ? "`bash -n`" : "PowerShell `[Parser]::ParseInput`") };
+}
+function defaultValue(p) {
+  if (p.type === "boolean") return false;
+  if (p.type === "enum") return (p.choices || [])[0] || "";
+  return "";
+}
+/* 编码默认值：算出生效动作，argv 和说明都用它 */
+function exeBase(t) {
+  const s = t.mode === "script" ? t.interpreter : t.executable;
+  return String(s || "").split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, "");
+}
+function encodingPlan(t) {
+  const m = t.encoding || "auto";
+  if (m === "off") return { kind: "none" };
+  if (m === "python") return { kind: "env", key: "PYTHONIOENCODING", value: "utf-8" };
+  if (m === "java") return { kind: "arg", value: "-Dfile.encoding=UTF-8" };
+  const b = exeBase(t);
+  if (/^(python|pythonw|py|uv|uvx)/.test(b)) return { kind: "env", key: "PYTHONIOENCODING", value: "utf-8" };
+  if (/^java(w)?$/.test(b)) return { kind: "arg", value: "-Dfile.encoding=UTF-8" };
+  return { kind: "none" };
+}
+function encodingText(t) {
+  const p = encodingPlan(t);
+  if (p.kind === "env") return "环境变量 " + p.key + "=" + p.value;
+  if (p.kind === "arg") return "argv 插入 " + p.value;
+  if (t.mode === "powershell") return "由外层注入 UTF-8 输出设置";
+  return "无";
+}
+function testVals(t) {
+  if (!TEST[t.id]) TEST[t.id] = {};
+  const v = TEST[t.id];
+  Object.keys(t.params).forEach((n) => { if (v[n] === undefined) v[n] = defaultValue(t.params[n]); });
+  return v;
+}
+function expand(t, parsed) {
+  const vals = testVals(t);
+  const out = [];
+  parsed.tokens.forEach((tk) => {
+    const ph = tk.parts.find((p) => p.t === "ph");
+    if (!ph) { out.push({ v: tk.parts.map((p) => p.text).join(""), k: "lit" }); return; }
+    const p = t.params[ph.name];
+    if (!p) { out.push({ v: "<未定义参数>", k: "sw" }); return; }
+    if (p.type === "boolean") {
+      if (vals[ph.name] === true) {
+        const txt = tk.parts.map((q) => (q.t === "lit" ? q.text : "")).join("");
+        if (txt) out.push({ v: txt, k: "sw" });
+      }
+      return;
+    }
+    const val = vals[ph.name] === "" || vals[ph.name] === undefined ? "<" + ph.name + ">" : String(vals[ph.name]);
+    out.push({ v: tk.parts.map((q) => (q.t === "lit" ? q.text : val)).join(""), k: "val" });
+  });
+  return out;
+}
+
+/* ============================================================
+   渲染
+   ============================================================ */
+function render() {
+  const host = $("#cards");
+  if (!state.tools.length) {
+    host.innerHTML = '<div class="empty"><p>尚未配置任何工具。</p>' +
+      '<button class="btn" data-act="add">新增工具</button></div>';
+  } else {
+    host.innerHTML = state.tools.map(cardHTML).join("");
+  }
+  renderTop();
+  closeMenu();
+  bind();
+}
+function renderTop() {
+  $("#revChip").textContent = "revision " + state.revision;
+  const old = document.getElementById("dirtyChip");
+  if (state.dirty && !old) {
+    const c = document.createElement("span");
+    c.className = "chip dirty"; c.id = "dirtyChip"; c.textContent = "未保存";
+    $("#revChip").after(c);
+  } else if (!state.dirty && old) old.remove();
+  const bad = state.tools.some((t) => toolErrors(t).length > 0);
+  const e = document.getElementById("errChip");
+  if (bad && !e) {
+    const c = document.createElement("span");
+    c.className = "chip bad"; c.id = "errChip"; c.textContent = "有校验错误";
+    $("#revChip").after(c);
+  } else if (!bad && e) e.remove();
+  $("#btnSave").disabled = !state.dirty;
+  $("#btnRevert").disabled = !state.dirty;
+}
+function cardHTML(t) {
+  const open = state.openId === t.id;
+  const bad = toolErrors(t).length > 0;
+  return '<section class="card' + (open ? " open" : "") + (bad ? " bad" : "") + '" data-id="' + t.id + '">' +
+    '<div class="chead" data-act="toggle">' +
+      '<span class="twist">▶</span>' +
+      '<span class="cname">' + esc(t.name || "（未命名）") + "</span>" +
+      '<span class="grow"></span>' +
+      '<label class="switch"><input type="checkbox" data-enable="1"' + (t.enabled ? " checked" : "") + "><i></i></label>" +
+      '<button class="dots" data-act="menu" title="更多">⋯</button>' +
+    "</div>" +
+    (open ? '<div class="cbody">' + bodyHTML(t) + "</div>" : "") +
+    "</section>";
+}
+function bodyHTML(t) {
+  const parsed = tokenize(t.template || "");
+  const diags = diagnostics(t, parsed);
+  return identHTML(t) + cmdPanel(t, parsed, diags) + paramPanel(t, parsed) + execPanel(t) + testPanel(t, parsed);
+}
+
+function identHTML(t) {
+  return '<div class="panel"><div class="grid2">' +
+    '<div class="fld" style="margin:0"><label>名称</label>' +
+      '<input type="text" class="mono" data-bind="name" value="' + esc(t.name) + '" placeholder="gauss_query"></div>' +
+    '<div class="fld" style="margin:0"><label>说明</label>' +
+      '<input type="text" data-bind="description" value="' + esc(t.description) + '" placeholder="模型可见的工具描述"></div>' +
+    "</div></div>";
+}
+
+function tokensHTML(t, parsed) {
+  return parsed.tokens.map((tk) => {
+    const ph = tk.parts.find((p) => p.t === "ph");
+    const p = ph ? t.params[ph.name] : null;
+    const kind = ph ? (p && p.type === "boolean" ? "gate" : "val") : "lit";
+    const inner = tk.parts.map((x) => x.t === "lit" ? esc(x.text) : '<span class="ph">$' + esc(x.name) + "$</span>").join("");
+    const label = !ph ? "固定" : (p ? (p.type === "boolean" ? "开关" : "参数") : "未声明");
+    return '<div class="tok t-' + kind + '"><span class="v">' + inner + '</span><span class="k">' + label + "</span></div>";
+  }).join("");
+}
+function stripHTML(t, parsed, diags) {
+  const toks = tokensHTML(t, parsed);
+  return (toks ? '<div class="tokens">' + toks + "</div>" : "") +
+    (diags.length
+      ? '<ul class="diag">' + diags.map((d) => '<li><span class="x">✕</span><span>' + d + "</span></li>").join("") + "</ul>"
+      : '<ul class="diag"><li class="ok"><span class="x">✓</span><span>模板与参数一致（' + parsed.usedInOrder.length + " 个）。</span></li></ul>");
+}
+function cmdPanel(t, parsed, diags) {
+  const shells = t.mode === "bash" || t.mode === "powershell";
+
+  let row1;
+  if (t.mode === "executable")
+    row1 = pathField(t, "executable", "可执行文件", "C:\\tools\\my.exe",
+      "绝对路径，或 PATH 中的名字。");
+  else if (t.mode === "script")
+    row1 = '<div class="grid2">' +
+      pathField(t, "interpreter", "解释器", "python", "") +
+      pathField(t, "scriptPath", "脚本路径", "C:\\tools\\x.py", "") + "</div>";
+  else
+    row1 = pathField(t, "interpreter", "解释器",
+        t.mode === "bash" ? "留空则用 PATH 中的 bash" : "留空则用 PATH 中的 pwsh", "") +
+      '<div class="fld"><label>脚本正文</label>' +
+        '<div class="ed"><pre class="hl" aria-hidden="true">' + hlScript(t.command, t.mode) + "</pre>" +
+        '<textarea class="mono" rows="4" spellcheck="false" data-bind="command" data-sync="1" placeholder="' +
+          (t.mode === "bash" ? 'echo "$1"' : "Get-Date") + '">' + esc(t.command) + "</textarea></div>" +
+        '<div class="help">' + (t.mode === "bash"
+          ? "指定 Git Bash / MSYS2 的 bash.exe。脚本内以 $1 $2 取参。"
+          : "指定 PowerShell 7 的 pwsh.exe 或 Windows PowerShell 5.1 的 powershell.exe。脚本内以 $args[0] 取参。") + "</div>" +
+        '<div class="chk"><button class="btn sm" data-act="syntax">检查语法</button>' +
+          '<span class="chkout" data-chk="1"></span></div></div>';
+
+  return '<div class="panel">' +
+    '<div class="ph"><span class="t">命令模板</span><span class="grow"></span>' +
+      '<span class="seg">' + MODES.map((m) =>
+        '<button data-mode="' + m[0] + '" class="' + (t.mode === m[0] ? "on" : "") + '">' + m[1] + "</button>").join("") +
+      "</span></div>" +
+    row1 +
+    '<div class="fld"><label>参数模板</label>' +
+      '<textarea class="mono" rows="2" spellcheck="false" data-tpl="1" placeholder="' +
+        (shells ? "$file$ $env$" : "--format=csv --sql $sql$ --limit $limit$") + '">' + esc(t.template) + "</textarea>" +
+      (shells ? '<div class="help">脚本内以 $1 $2 取参。</div>' : "") +
+    "</div>" +
+    '<div class="strip">' + stripHTML(t, parsed, diags) + "</div>" +
+    "</div>";
+}
+
+function paramPanel(t, parsed) {
+  const names = paramNames(t, parsed);
+  const rows = names.map((n) => {
+    const p = t.params[n];
+    if (!p) return "";
+    const unused = !parsed.usedInOrder.includes(n);
+    const desc = '<input type="text" data-param="' + esc(n) + '" data-pf="description" value="' + esc(p.description) + '" placeholder="说明">';
+    const cells = p.type === "enum"
+      ? '<div class="grid2" style="gap:5px">' + desc +
+        '<input type="text" class="mono" data-param="' + esc(n) + '" data-pf="choicesText" value="' +
+        esc((p.choices || []).join(", ")) + '" placeholder="staging, prod" title="枚举可选值，逗号分隔"></div>'
+      : desc;
+    return '<tr class="' + (unused ? "unused" : "") + '">' +
+      '<td><input type="text" class="mono nm" data-param="' + esc(n) + '" data-pf="name" value="' + esc(n) +
+        '" title="改名会同步替换参数模板里的占位符">' + (unused ? '<span class="tag">未引用</span>' : "") + "</td>" +
+      '<td><select data-param="' + esc(n) + '" data-pf="type">' +
+        TYPES.map((x) => '<option value="' + x[0] + '"' + (p.type === x[0] ? " selected" : "") + ">" + x[1] + "</option>").join("") +
+      "</select></td>" +
+      '<td class="cb"><input type="checkbox" data-param="' + esc(n) + '" data-pf="required"' + (p.required ? " checked" : "") + "></td>" +
+      "<td>" + cells + "</td>" +
+      '<td style="width:26px"><button class="del" data-delparam="' + esc(n) + '" title="删除参数">×</button></td>' +
+      "</tr>";
+  }).join("");
+
+  return '<div class="panel">' +
+    '<div class="ph"><span class="t">参数设置</span><span class="grow"></span>' +
+      '<button class="btn sm" data-act="addparam">＋ 参数</button></div>' +
+    (names.length
+      ? '<table class="tbl"><thead><tr><th style="width:22%">名称</th><th style="width:14%">类型</th>' +
+        '<th style="width:8%">必填</th><th>说明 / 枚举值</th><th></th></tr></thead><tbody>' + rows + "</tbody></table>"
+      : '<div class="note">尚未定义参数。</div>') +
+    "</div>";
+}
+
+function execPanel(t) {
+  const opt = (v, cur) => (cur === v ? " selected" : "");
+  return '<div class="panel"><div class="ph"><span class="t">执行与安全</span></div>' +
+    '<div class="grid2">' +
+      '<div class="fld" style="margin:0"><label>工作目录（留空为会话工作目录）</label>' +
+        '<input type="text" class="mono" data-bind="cwd" value="' + esc(t.cwd) + '" placeholder="留空"></div>' +
+      '<div class="fld" style="margin:0"><label>超时（毫秒）</label>' +
+        '<input type="number" data-bind="timeoutMs" value="' + t.timeoutMs + '" min="1000" max="600000"></div>' +
+    "</div>" +
+    '<div class="grid2" style="margin-top:9px">' +
+      '<div class="fld" style="margin:0"><label>沙箱</label><select data-bind="sandbox">' +
+        '<option value="read-only"' + opt("read-only", t.sandbox) + ">read-only</option>" +
+        '<option value="workspace-write"' + opt("workspace-write", t.sandbox) + ">workspace-write</option></select></div>" +
+      '<div class="fld" style="margin:0"><label>审批</label><select data-bind="approval">' +
+        '<option value="auto"' + opt("auto", t.approval) + ">auto</option>" +
+        '<option value="always"' + opt("always", t.approval) + ">always</option></select></div>" +
+    "</div>" +
+    '<div class="grid2" style="margin-top:9px">' +
+      '<div class="fld" style="margin:0"><label>输出解析</label><select data-bind="parse">' +
+        '<option value="text"' + opt("text", t.parse) + ">text</option>" +
+        '<option value="json"' + opt("json", t.parse) + ">json</option></select></div>" +
+      '<div class="fld" style="margin:0"><label>编码默认值</label><select data-bind="encoding">' +
+        '<option value="auto"' + opt("auto", t.encoding) + ">自动识别解释器</option>" +
+        '<option value="python"' + opt("python", t.encoding) + ">Python：PYTHONIOENCODING=utf-8</option>" +
+        '<option value="java"' + opt("java", t.encoding) + ">Java：-Dfile.encoding=UTF-8</option>" +
+        '<option value="off"' + opt("off", t.encoding) + ">关闭</option></select>" +
+        '<div class="help">生效：<span class="mono">' + esc(encodingText(t)) + "</span></div></div>" +
+    "</div></div>";
+}
+
+function testPanel(t, parsed) {
+  const vals = testVals(t);
+  const inputs = paramNames(t, parsed).map((n) => {
+    const p = t.params[n];
+    if (!p) return "";
+    let ctl;
+    if (p.type === "boolean")
+      ctl = '<select data-test="' + esc(n) + '"><option value="false"' + (vals[n] ? "" : " selected") + ">false</option>" +
+            '<option value="true"' + (vals[n] ? " selected" : "") + ">true</option></select>";
+    else if (p.type === "enum")
+      ctl = '<select data-test="' + esc(n) + '">' + (p.choices || []).map((c) =>
+              '<option' + (String(vals[n]) === c ? " selected" : "") + ">" + esc(c) + "</option>").join("") + "</select>";
+    else
+      ctl = '<input type="text" class="mono" data-test="' + esc(n) + '" value="' + esc(vals[n]) + '" placeholder="' + esc(n) + '">';
+    return '<div class="fld" style="margin:0"><label>' + esc(n) + "</label>" + ctl + "</div>";
+  }).join("");
+
+  const chips = argvChips(t, parsed);
+
+  return '<div class="panel">' +
+    '<div class="ph"><span class="t">运行测试</span><span class="meta">演示数据</span><span class="grow"></span>' +
+      '<button class="btn sm primary" data-act="run">执行</button></div>' +
+    (inputs ? '<div class="grid2">' + inputs + "</div>" : '<div class="note">无参数。</div>') +
+    '<div class="argv">' + chips + "</div>" +
+    '<div class="out" data-out="1"><span class="m">尚未执行。</span></div>' +
+    "</div>";
+}
+
+/* ============================================================
+   校验
+   ============================================================ */
+function toolErrors(t) {
+  const e = [];
+  if (!String(t.name).trim()) e.push("名称为空");
+  else if (!/^[a-z][a-z0-9_]*$/.test(t.name)) e.push("名称格式");
+  else if (t.name === "run_code") e.push("名称为保留名");
+  if (t.mode === "executable" && !String(t.executable).trim()) e.push("未填可执行文件");
+  if (t.mode === "script" && (!String(t.interpreter).trim() || !String(t.scriptPath).trim())) e.push("解释器或脚本缺失");
+  if ((t.mode === "bash" || t.mode === "powershell") && !String(t.command).trim()) e.push("脚本为空");
+  ["executable", "interpreter", "scriptPath"].forEach((f) => {
+    const p = pathProblem(t[f]);
+    if (p) e.push(f + " " + p);
+  });
+  const parsed = tokenize(t.template || "");
+  if (parsed.errors.length) e.push("模板语法");
+  if (missingParams(t, parsed).length) e.push("参数未声明");
+  if (unusedParams(t, parsed).length) e.push("参数未引用");
+  Object.keys(t.params).forEach((n) => {
+    const p = t.params[n];
+    if (p.type === "enum" && !(p.choices || []).length) e.push(n + " 无枚举值");
+    if (p.type === "enum" && new Set(p.choices).size !== p.choices.length) e.push(n + " 枚举值重复");
+  });
+  return e;
+}
+function allErrors() {
+  const out = [];
+  const seen = {};
+  state.tools.forEach((t) => {
+    const e = toolErrors(t);
+    if (e.length) out.push((t.name || "未命名") + "：" + e[0]);
+    if (t.name) { seen[t.name] = (seen[t.name] || 0) + 1; }
+  });
+  Object.keys(seen).forEach((n) => { if (seen[n] > 1) out.push(n + "：名称重复"); });
+  return out;
+}
+
+/* ============================================================
+   交互
+   ============================================================ */
+function touch() {
+  if (!state.dirty) { state.dirty = true; if (snapshot == null) snapshot = clone(state.tools); }
+  renderTop();
+}
+function toolOf(el) {
+  const card = el.closest ? el.closest(".card") : null;
+  return card ? state.tools.find((t) => t.id === card.dataset.id) : null;
+}
+
+let menuEl = null;
+function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+/* ============================================================
+   导入 / 导出（单工具 JSON）
+   ------------------------------------------------------------
+   真实插件里读写文件必须走 Host 侧（浏览器没有磁盘权限）：
+     - 导出：Host 把工具序列化成 JSON 交给 Client，Client 触发下载；
+             或直接由 Host 写进 <profile>/custom-tools/export/<name>.json
+     - 导入：Client 只把文件内容（字符串）交给 Host，由 Host 做
+             严格校验 + 去重 + 落盘，Client 不解析也不信任文件内容。
+   demo 里用 Blob 下载 + FileReader 读，形状与将来的 wire 格式一致。
+   ============================================================ */
+const TOOL_JSON_KEYS = ["name", "description", "enabled", "mode", "executable", "interpreter",
+  "scriptPath", "command", "template", "cwd", "timeoutMs", "sandbox", "approval", "encoding", "parse"];
+
+function toolToJson(t) {
+  const o = { format: "dsh-custom-tools/tool@1" };
+  TOOL_JSON_KEYS.forEach((k) => { o[k] = t[k]; });
+  o.params = {};
+  Object.keys(t.params).forEach((n) => {
+    const p = t.params[n];
+    const q = { type: p.type, required: !!p.required, description: p.description || "" };
+    if (p.type === "enum") q.choices = (p.choices || []).slice();
+    o.params[n] = q;
+  });
+  return o;
+}
+function jsonToTool(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("文件不是 JSON 对象");
+  const src = raw.tool && typeof raw.tool === "object" ? raw.tool : raw;
+  const t = newTool({});
+  TOOL_JSON_KEYS.forEach((k) => { if (src[k] !== undefined && src[k] !== null) t[k] = src[k]; });
+  if (!["executable", "script", "bash", "powershell"].includes(t.mode)) t.mode = "executable";
+  if (!["text", "json"].includes(t.parse)) t.parse = "text";
+  if (!["auto", "python", "java", "off"].includes(t.encoding)) t.encoding = "auto";
+  if (!["read-only", "workspace-write"].includes(t.sandbox)) t.sandbox = "workspace-write";
+  if (!["auto", "always"].includes(t.approval)) t.approval = "auto";
+  t.timeoutMs = Math.min(600000, Math.max(1000, Number(t.timeoutMs) || 120000));
+  t.executable = String(t.executable || "");
+  t.interpreter = String(t.interpreter || "");
+  t.scriptPath = String(t.scriptPath || "");
+  t.command = String(t.command || "");
+  t.template = String(t.template || "");
+  t.description = String(t.description || "");
+  t.enabled = t.enabled !== false;
+  const ps = src.params && typeof src.params === "object" && !Array.isArray(src.params) ? src.params : {};
+  t.params = {};
+  Object.keys(ps).forEach((n) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(n) || !ps[n] || typeof ps[n] !== "object") return;
+    const s = ps[n];
+    const type = ["string", "number", "boolean", "enum"].includes(s.type) ? s.type : "string";
+    t.params[n] = P(type, String(s.description || ""), {
+      required: s.required !== false,
+      choices: type === "enum" && Array.isArray(s.choices) ? s.choices.map(String) : [],
+    });
+  });
+  return t;
+}
+function uniqueToolName(base) {
+  const taken = state.tools.map((x) => x.name);
+  let n = String(base || "").trim() || "imported";
+  if (!taken.includes(n)) return n;
+  let i = 2;
+  while (taken.includes(n + "_" + i)) i++;
+  return n + "_" + i;
+}
+function exportTool(t) {
+  const data = JSON.stringify(toolToJson(t), null, 2) + "\n";
+  const file = String(t.name || "tool").replace(/[^\w.-]+/g, "_") + ".json";
+  const blob = new Blob([data], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = file;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  showBanner("ok", "已导出 " + file, data.length + " 字节 · 参数 " + Object.keys(t.params).length + " 个。");
+}
+function importTool() {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".json,application/json";
+  inp.style.display = "none";
+  document.body.appendChild(inp);
+  inp.addEventListener("change", () => {
+    const f = inp.files && inp.files[0];
+    inp.remove();
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      let t;
+      try { t = jsonToTool(JSON.parse(String(rd.result))); }
+      catch (e) { showBanner("err", "导入失败", f.name + "：" + (e && e.message ? e.message : "无法解析")); return; }
+      t.name = uniqueToolName(t.name);
+      state.tools.push(t);
+      state.openId = t.id;
+      touch(); render();
+      showBanner("ok", "已导入 " + t.name,
+        f.name + " · 参数 " + Object.keys(t.params).length + " 个。导入不落盘，点「保存」才生效。");
+    };
+    rd.onerror = () => showBanner("err", "导入失败", "读取文件出错。");
+    rd.readAsText(f, "utf-8");
+  });
+  inp.click();
+}
+
+function openMenu(btn, t) {
+  closeMenu();
+  const m = document.createElement("div");
+  m.className = "menu";
+  m.innerHTML = '<button data-menu="export">导出 JSON</button>' +
+    '<button data-menu="import">导入 JSON</button>' +
+    '<button data-menu="dup">复制</button>' +
+    '<button data-menu="del" class="danger">删除</button>';
+  document.body.appendChild(m);
+  const r = btn.getBoundingClientRect();
+  m.style.top = (r.bottom + 4) + "px";
+  m.style.left = Math.max(8, r.right - m.offsetWidth) + "px";
+  m.onclick = (ev) => {
+    const a = ev.target.dataset && ev.target.dataset.menu;
+    if (!a) return;
+    closeMenu();
+    if (a === "export") { exportTool(t); return; }
+    if (a === "import") { importTool(); return; }
+    if (a === "dup") {
+      const c = clone(t);
+      c.id = nid();
+      c.name = t.name ? t.name + "_copy" : "";
+      state.tools.splice(state.tools.indexOf(t) + 1, 0, c);
+      state.openId = c.id;
+    } else {
+      state.tools = state.tools.filter((x) => x.id !== t.id);
+      if (state.openId === t.id) state.openId = state.tools[0] ? state.tools[0].id : null;
+      delete TEST[t.id];
+    }
+    touch(); render();
+  };
+  menuEl = m;
+}
+
+/* 文件选择器
+   ------------------------------------------------------------
+   真实实现：点「选择…」应当打开**操作系统原生的文件选择器**。DSH 已经提供了
+   这个能力，不要自己写对话框，也不要调 Node 的 dialog API：
+
+     // Client 半侧
+     export const inject = ['remote', 'remote.directoryPicker']
+     const r = await ctx.remote.directoryPicker.pick(signal)
+     if (r.ok && r.value) setField(r.value)   // 绝对路径；取消时 value 为 null
+
+   注意两点：
+   1. 宿主这个 verb 是**目录**选择器（pick 返回目录的绝对路径）。选文件时先用
+      pick() 定位目录，再用 ctx.remote.directoryPicker.list(dir, signal) 列出
+      该层让用户点选文件；不要假设 pick 能直接返回文件路径。
+   2. 这个 seam 是 discriminating capability：native 后端才有系统对话框，
+      browse 后端下 pick 会被**拒绝而不是降级**。所以要先试 pick，失败再退回
+      list() 驱动的应用内浏览器。
+   3. pick(signal) 不需要 agent，设置在全局作用域也能用。
+
+   这个 mock 是普通 HTML 页面，浏览器不允许网页获知真实磁盘路径
+   （<input type=file> 只给 File.name，showOpenFilePicker 的 handle 也只有
+   name），所以这里只给提示，不假装能选。 */
+function noticePick(btn) {
+  const fld = btn.closest && btn.closest(".fld");
+  if (!fld) return;
+  let n = fld.querySelector(".picknote");
+  if (!n) {
+    n = document.createElement("div");
+    n.className = "help picknote";
+    fld.appendChild(n);
+  }
+  n.textContent = "真实实现：ctx.remote.directoryPicker.pick() 打开系统原生选择器；demo 页面无磁盘路径权限，请直接填写。";
+}
+
+function bind() {
+  document.querySelectorAll("[data-act]").forEach((el) => {
+    el.onclick = (ev) => {
+      const a = el.dataset.act;
+      if (a === "toggle") {
+        if (ev.target.closest("[data-enable]") || ev.target.closest(".dots")) return;
+        const t = toolOf(el); if (!t) return;
+        state.openId = state.openId === t.id ? null : t.id;
+        render(); return;
+      }
+      if (a === "menu") { const t = toolOf(el); if (t) openMenu(el, t); ev.stopPropagation(); return; }
+      if (a === "add") { addTool(); return; }
+      if (a === "addparam") {
+        const t = toolOf(el); if (!t) return;
+        const served = tokenize(t.template || "");
+        const miss = served.errors.length ? [] : missingParams(t, served);
+        let n;
+        if (miss.length) n = miss[0];
+        else { let i = 1; do { n = "param" + i++; } while (t.params[n]); }
+        t.params[n] = P("string", "");
+        touch(); render(); return;
+      }
+      if (a === "run") { const t = toolOf(el); if (t) runTest(t); return; }
+      if (a === "syntax") {
+        const t = toolOf(el); if (!t) return;
+        const out = el.parentElement && el.parentElement.querySelector("[data-chk]");
+        const r = checkSyntax(t);
+        if (out) { out.className = "chkout " + (r.ok ? "ok" : "bad"); out.textContent = r.msg; }
+        return;
+      }
+    };
+  });
+
+  document.querySelectorAll("[data-mode]").forEach((b) => {
+    b.onclick = () => { const t = toolOf(b); if (!t) return; t.mode = b.dataset.mode; touch(); render(); };
+  });
+
+  document.querySelectorAll("[data-enable]").forEach((cb) => {
+    cb.onchange = () => { const t = toolOf(cb); if (!t) return; t.enabled = cb.checked; touch(); render(); };
+  });
+
+  document.querySelectorAll("[data-delparam]").forEach((b) => {
+    b.onclick = () => {
+      const t = toolOf(b); if (!t) return;
+      const n = b.dataset.delparam;
+      delete t.params[n];
+      const parsed = tokenize(t.template || "");
+      const kept = parsed.tokens.map((tk) => {
+        if (!tk.parts.some((p) => p.t === "ph" && p.name === n))
+          return tk.parts.map((p) => (p.t === "lit" ? p.text : "$" + p.name + "$")).join("");
+        const txt = tk.parts.filter((p) => !(p.t === "ph" && p.name === n))
+          .map((p) => (p.t === "lit" ? p.text : "$" + p.name + "$")).join("");
+        return txt.trim() ? txt : null;
+      }).filter((x) => x !== null);
+      t.template = kept.join(" ");
+      if (TEST[t.id]) delete TEST[t.id][n];
+      touch(); render();
+    };
+  });
+
+  document.querySelectorAll("[data-bind]").forEach((el) => {
+    const k = el.dataset.bind;
+    const ev = el.tagName === "SELECT" ? "change" : "input";
+    el.addEventListener(ev, () => {
+      const t = toolOf(el); if (!t) return;
+      if (k === "timeoutMs") t.timeoutMs = Number(el.value);
+      else t[k] = el.value;
+      touch();
+      if (k === "encoding") {
+        const help = el.parentElement && el.parentElement.querySelector(".help");
+        if (help) help.innerHTML = "生效：<span class=\"mono\">" + esc(encodingText(t)) + "</span>";
+        refreshArgv(t);
+      }
+      if (k === "name") {
+        const card = el.closest(".card");
+        const nm = card && card.querySelector(".cname");
+        if (nm) nm.textContent = el.value || "（未命名）";
+      }
+      if (k === "executable" || k === "interpreter") refreshArgv(t);
+    });
+  });
+
+  document.querySelectorAll("[data-sync]").forEach((ta) => {
+    const box = ta.parentElement;
+    const pre = box && box.querySelector("pre.hl");
+    if (!pre) return;
+    const paint = () => {
+      const t = toolOf(ta);
+      pre.innerHTML = hlScript(ta.value, t ? t.mode : "bash");
+      pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft;
+    };
+    ta.addEventListener("input", paint);
+    ta.addEventListener("scroll", () => { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft; });
+  });
+
+  document.querySelectorAll("[data-pick]").forEach((b) => {
+    b.onclick = () => noticePick(b);
+  });
+
+  const tpl = document.querySelector("[data-tpl]");
+  if (tpl) tpl.addEventListener("input", () => {
+    const t = toolOf(tpl); if (!t) return;
+    t.template = tpl.value;
+    touch();
+    refreshStrip(t);
+  });
+
+  document.querySelectorAll("[data-param]").forEach((el) => {
+    const n = el.dataset.param, f = el.dataset.pf;
+    const ev = el.tagName === "SELECT" || el.type === "checkbox" ? "change" : (f === "name" ? "change" : "input");
+    el.addEventListener(ev, () => {
+      const t = toolOf(el); if (!t) return;
+      const p = t.params[n]; if (!p) return;
+      if (f === "name") {
+        if (renameParam(t, n, el.value)) { touch(); render(); }
+        else { el.value = n; }
+        return;
+      }
+      if (f === "choicesText") p.choices = el.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+      else if (f === "type") p.type = el.value;
+      else p[f] = el.type === "checkbox" ? el.checked : el.value;
+      touch();
+      if (f === "type") render();
+    });
+  });
+
+  document.querySelectorAll("[data-test]").forEach((el) => {
+    const apply = () => {
+      const t = toolOf(el); if (!t) return;
+      const v = testVals(t);
+      const p = t.params[el.dataset.test];
+      v[el.dataset.test] = p && p.type === "boolean" ? el.value === "true" : el.value;
+      refreshArgv(t);
+    };
+    el.addEventListener("input", apply);
+    el.addEventListener("change", apply);
+  });
+}
+
+function argvChips(t, parsed) {
+  const plan = encodingPlan(t);
+  let head = "";
+  if (plan.kind === "env")
+    head += '<span class="av env" title="编码默认值：以环境变量注入">' + esc(plan.key + "=" + plan.value) + "</span>";
+  head += '<span class="av exe">' + esc(progLine(t)) + "</span>";
+  if (plan.kind === "arg")
+    head += '<span class="av env" title="编码默认值：插在 argv[0] 之后">' + esc(plan.value) + "</span>";
+  return head + expand(t, parsed).map((x) => '<span class="av ' + (x.k === "lit" ? "" : x.k) + '">' + esc(x.v) + "</span>").join("");
+}
+
+function refreshStrip(t) {
+  const card = document.querySelector('.card[data-id="' + t.id + '"]');
+  if (!card) return;
+  const box = card.querySelector(".strip");
+  if (box) {
+    const parsed = tokenize(t.template || "");
+    box.innerHTML = stripHTML(t, parsed, diagnostics(t, parsed));
+  }
+  refreshArgv(t);
+}
+function refreshArgv(t) {
+  const card = document.querySelector('.card[data-id="' + t.id + '"]');
+  if (!card) return;
+  const box = card.querySelector(".argv");
+  if (!box) return;
+  box.innerHTML = argvChips(t, tokenize(t.template || ""));
+}
+
+function runTest(t) {
+  const card = document.querySelector('.card[data-id="' + t.id + '"]');
+  if (!card) return;
+  const out = card.querySelector("[data-out]");
+  if (!t.enabled) {
+    out.innerHTML = '<span class="errl">[TOOL_DISABLED] 工具已停用，不会注册到模型侧。</span>';
+    return;
+  }
+  const errs = toolErrors(t);
+  if (errs.length) {
+    out.innerHTML = '<span class="errl">[INVALID_CONFIG] ' + esc(errs.join("；")) + "</span>";
+    return;
+  }
+  const body = t.parse === "json" ? '{"rows":2,"ms":13}'
+    : t.name === "gauss_query" ? "id,name\n1,alice\n2,bob" : "ok";
+  out.innerHTML = '<span class="m">exit 0 · 213ms · ' + esc(t.sandbox) + " · stdout</span>\n" +
+    '<span class="okl">' + esc(body) + "</span>";
+}
+
+function addTool() {
+  const t = newTool({ name: "", template: "" });
+  state.tools.push(t);
+  state.openId = t.id;
+  touch(); render();
+  const el = document.querySelector('.card[data-id="' + t.id + '"] input[data-bind="name"]');
+  if (el) el.focus();
+}
+
+function save() {
+  if (state.conflict) {
+    showBanner("err", "保存被拒绝（settings/conflict）",
+      "配置已在别处更新：本地 revision " + state.revision + "，当前 revision " + (state.revision + 1) + "。",
+      [{ label: "重新读取", onClick: () => { state.conflict = false; state.revision++; hideBanner(); renderTop(); } }]);
+    return;
+  }
+  const bad = allErrors();
+  if (bad.length) {
+    render();
+    showBanner("err", "保存被拒绝（settings/rejected）",
+      "有 " + bad.length + " 处不合法：" + bad.slice(0, 3).map(esc).join("；") + (bad.length > 3 ? " …" : ""));
+    return;
+  }
+  state.revision++; state.dirty = false; snapshot = clone(state.tools);
+  render();
+  showBanner("ok", "已保存", "revision " + state.revision + "，下一个模型步骤生效。");
+}
+function showBanner(kind, title, body, actions) {
+  const b = $("#banner");
+  b.hidden = false; b.className = "banner " + kind;
+  b.innerHTML = '<div class="grow"><b>' + esc(title) + "</b> " + body + "</div>";
+  (actions || []).forEach((a) => {
+    const btn = document.createElement("button");
+    btn.className = "btn sm"; btn.textContent = a.label; btn.onclick = a.onClick;
+    b.appendChild(btn);
+  });
+}
+function hideBanner() { const b = $("#banner"); b.hidden = true; b.innerHTML = ""; }
+
+$("#btnSave").onclick = save;
+$("#btnRevert").onclick = () => {
+  if (!snapshot) return;
+  state.tools = clone(snapshot);
+  state.dirty = false;
+  hideBanner(); render();
+};
+$("#btnAdd").onclick = addTool;
+document.addEventListener("click", (e) => { if (menuEl && !menuEl.contains(e.target)) closeMenu(); });
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "自定义工具",
+    "description": "把本地可执行文件、脚本和固定 shell 命令声明成 Agent 工具。"
+  }
+}

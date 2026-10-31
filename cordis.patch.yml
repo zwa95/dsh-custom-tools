@@ -1,0 +1,7 @@
+# One bare package row:
+#   custom-tools : carries both halves — Host (tools + commands) and the
+#                  browser half (settings.section). The row id is the settings
+#                  namespace, so it must stay `custom-tools`.
+- insert:
+    - id: custom-tools
+      name: dsh-custom-tools

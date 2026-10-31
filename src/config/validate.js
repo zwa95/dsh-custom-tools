@@ -1,0 +1,458 @@
+/**
+ * Cross-field validation for `tools[]`.
+ *
+ * Pure: no Cordis, no filesystem, no network, no clock. It runs twice —
+ * once at save time (so the settings page can reject a bad document before it
+ * is persisted) and once at compile time (so a hand-edited patch still cannot
+ * smuggle an invalid tool into the registry). Keeping it pure is what makes
+ * both paths share one set of rules.
+ *
+ * An issue is `{ tool, path, code, message, severity }` where `path` is a
+ * dotted, human-readable location (`tools[2].args[1].join`) — the settings page
+ * prints it verbatim, so it must address the *document* the user is editing.
+ */
+
+const NAME_PATTERN = /^[a-z][a-z0-9_]{0,40}$/
+
+/**
+ * Names that would shadow or confuse a built-in tool. Not an exhaustive list of
+ * the host's tools — it only needs to cover the ones an author plausibly types
+ * and that DSH itself may register later.
+ */
+export const RESERVED_NAMES = new Set([
+  'bash', 'pwsh', 'powershell', 'shell', 'cmd',
+  'read', 'write', 'edit', 'multi_edit', 'apply_patch',
+  'grep', 'glob', 'ls', 'find', 'list', 'search', 'web_search', 'web_fetch',
+  'task', 'todo', 'todo_write', 'subagent', 'workflow', 'skill',
+  'send_message', 'ask_user_question', 'create_goal', 'update_goal', 'get_goal',
+  'compress', 'decompress', 'search_context', 'acp_status',
+  'custom_tools', 'custom-tools',
+])
+
+const fail = (tool, path, code, message) => ({
+  tool: tool === undefined ? undefined : tool,
+  path,
+  code,
+  message,
+  severity: 'error',
+})
+
+const warn = (tool, path, code, message) => ({
+  tool: tool === undefined ? undefined : tool,
+  path,
+  code,
+  message,
+  severity: 'warning',
+})
+
+const isPlainObject = (value) =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** Which argv directives a binding carries, for the "exactly one" rule. */
+function bindingShape(binding) {
+  const shape = []
+  if (typeof binding.literal === 'string') shape.push('literal')
+  if (typeof binding.arg === 'string') shape.push('arg')
+  if (typeof binding.flag === 'string') shape.push('flag')
+  return shape
+}
+
+function validateParameter(toolName, paramName, spec, path, issues) {
+  if (!isPlainObject(spec)) {
+    issues.push(fail(toolName, path, 'PARAMETER_SHAPE', `参数 ${paramName} 必须是对象`))
+    return
+  }
+
+  const type = spec.type
+  if (!['string', 'number', 'integer', 'boolean', 'array'].includes(type)) {
+    issues.push(fail(toolName, path, 'PARAMETER_TYPE',
+      `参数 ${paramName} 的 type 必须是 string/number/integer/boolean/array`))
+    return
+  }
+
+  if (type === 'array') {
+    if (!spec.items) {
+      issues.push(fail(toolName, path, 'PARAMETER_ITEMS',
+        `数组参数 ${paramName} 必须声明 items`))
+    } else if (!['string', 'number', 'integer', 'boolean'].includes(spec.items)) {
+      issues.push(fail(toolName, path, 'PARAMETER_ITEMS',
+        `数组参数 ${paramName} 的 items 只能是标量类型`))
+    }
+  } else if (spec.items !== undefined) {
+    issues.push(warn(toolName, `${path}.items`, 'PARAMETER_ITEMS_IGNORED',
+      `参数 ${paramName} 不是数组，items 会被忽略`))
+  }
+
+  if (spec.enum !== undefined) {
+    if (type !== 'string') {
+      issues.push(fail(toolName, `${path}.enum`, 'PARAMETER_ENUM_TYPE',
+        `enum 仅支持 string 参数（${paramName} 是 ${type}）`))
+    } else if (spec.enum.length === 0) {
+      issues.push(fail(toolName, `${path}.enum`, 'PARAMETER_ENUM_EMPTY',
+        `参数 ${paramName} 的 enum 不能为空`))
+    } else if (new Set(spec.enum).size !== spec.enum.length) {
+      issues.push(fail(toolName, `${path}.enum`, 'PARAMETER_ENUM_DUPLICATE',
+        `参数 ${paramName} 的 enum 有重复选项`))
+    }
+  }
+
+  if (spec.min !== undefined && spec.max !== undefined && spec.min > spec.max) {
+    issues.push(fail(toolName, `${path}.min`, 'PARAMETER_RANGE',
+      `参数 ${paramName} 的 min 大于 max`))
+  }
+  if (spec.minLength !== undefined && spec.maxLength !== undefined
+    && spec.minLength > spec.maxLength) {
+    issues.push(fail(toolName, `${path}.minLength`, 'PARAMETER_LENGTH',
+      `参数 ${paramName} 的 minLength 大于 maxLength`))
+  }
+
+  if (spec.default !== undefined && spec.default !== '') {
+    const parsed = tryParseJson(spec.default)
+    if (!parsed.ok) {
+      issues.push(fail(toolName, `${path}.default`, 'PARAMETER_DEFAULT_JSON',
+        `参数 ${paramName} 的 default 不是合法 JSON：${parsed.error}`))
+    }
+  }
+}
+
+export function tryParseJson(text) {
+  if (typeof text !== 'string' || text.trim() === '') {
+    return { ok: true, value: undefined }
+  }
+  try {
+    return { ok: true, value: JSON.parse(text) }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+function validateArgs(tool, path, issues) {
+  const parameters = isPlainObject(tool.parameters) ? tool.parameters : {}
+  const args = Array.isArray(tool.args) ? tool.args : []
+  let stdinCount = 0
+
+  args.forEach((binding, index) => {
+    const at = `${path}.args[${index}]`
+    if (!isPlainObject(binding)) {
+      issues.push(fail(tool.name, at, 'ARG_SHAPE', '每个 arg 条目必须是对象'))
+      return
+    }
+
+    const shape = bindingShape(binding)
+    const hasStdin = binding.stdin !== undefined
+
+    if (shape.length === 0 && !hasStdin) {
+      issues.push(fail(tool.name, at, 'ARG_EMPTY',
+        'arg 条目必须给出 literal、arg 或 flag 之一'))
+      return
+    }
+    if (shape.length > 1) {
+      issues.push(fail(tool.name, at, 'ARG_AMBIGUOUS',
+        `arg 条目同时声明了 ${shape.join(' / ')}，只能选一个`))
+      return
+    }
+
+    if (hasStdin) {
+      stdinCount += 1
+      if (binding.stdin !== 'raw' && binding.stdin !== 'json') {
+        issues.push(fail(tool.name, `${at}.stdin`, 'ARG_STDIN_VALUE',
+          'stdin 只能是 "raw" 或 "json"'))
+      }
+      if (binding.stdin === 'raw' && shape[0] !== 'arg') {
+        issues.push(fail(tool.name, `${at}.stdin`, 'ARG_STDIN_RAW_SOURCE',
+          'stdin: "raw" 必须与 arg 一起使用'))
+      }
+      if (binding.stdin === 'json' && shape.length > 0) {
+        issues.push(fail(tool.name, `${at}.stdin`, 'ARG_STDIN_JSON_EXCLUSIVE',
+          'stdin: "json" 必须是独立条目，不能同时绑定 literal/arg/flag'))
+      }
+    }
+
+    if (shape[0] === 'literal') {
+      const extra = ['arg', 'flag', 'prefix', 'suffix', 'join', 'repeat', 'json',
+        'omitIfEmpty', 'allowLeadingDash', 'allowResponseFile'].filter(
+        (key) => binding[key] !== undefined && binding[key] !== false,
+      )
+      if (extra.length > 0) {
+        issues.push(warn(tool.name, at, 'ARG_LITERAL_EXTRA',
+          `literal 条目上的 ${extra.join('/')} 不会生效`))
+      }
+      if (typeof binding.literal !== 'string') {
+        issues.push(fail(tool.name, `${at}.literal`, 'ARG_LITERAL_TYPE',
+          'literal 必须是字符串'))
+      }
+      return
+    }
+
+    if (shape[0] === 'flag') {
+      if (binding.as === undefined) {
+        issues.push(fail(tool.name, `${at}.as`, 'ARG_FLAG_AS',
+          'flag 条目必须声明 as（true 时输出什么）'))
+      } else if (typeof binding.as !== 'string'
+        && !(Array.isArray(binding.as) && binding.as.every((v) => typeof v === 'string'))) {
+        issues.push(fail(tool.name, `${at}.as`, 'ARG_FLAG_AS_TYPE',
+          'as 必须是字符串或字符串数组'))
+      }
+      if (binding.repeat || binding.join !== undefined || binding.json) {
+        issues.push(fail(tool.name, at, 'ARG_FLAG_MAPPER',
+          'flag 条目不能同时使用 repeat / join / json'))
+      }
+      if (binding.stdin !== undefined && binding.stdin !== 'json') {
+        issues.push(fail(tool.name, `${at}.stdin`, 'ARG_FLAG_STDIN',
+          'flag 条目不能写 stdin'))
+      }
+      const spec = parameters[binding.flag]
+      if (!spec) {
+        issues.push(fail(tool.name, at, 'ARG_FLAG_UNKNOWN_PARAMETER',
+          `flag 引用了未声明的参数 ${binding.flag}`))
+      } else if (spec.type !== 'boolean') {
+        issues.push(fail(tool.name, at, 'ARG_FLAG_NOT_BOOLEAN',
+          `flag 引用的参数 ${binding.flag} 必须是 boolean`))
+      }
+      return
+    }
+
+    if (shape.length === 0) return // bare `{stdin:'json'}` already validated above
+
+    // shape[0] === 'arg'
+    const spec = parameters[binding.arg]
+    if (!spec) {
+      issues.push(fail(tool.name, at, 'ARG_UNKNOWN_PARAMETER',
+        `arg 引用了未声明的参数 ${binding.arg}`))
+    } else {
+      if (binding.repeat && spec.type !== 'array') {
+        issues.push(fail(tool.name, `${at}.repeat`, 'ARG_REPEAT_TYPE',
+          `repeat 只能用于数组参数（${binding.arg} 是 ${spec.type}）`))
+      }
+      if (binding.join !== undefined && spec.type !== 'array') {
+        issues.push(fail(tool.name, `${at}.join`, 'ARG_JOIN_TYPE',
+          `join 只能用于数组参数（${binding.arg} 是 ${spec.type}）`))
+      }
+      if (binding.repeat && binding.join !== undefined) {
+        issues.push(fail(tool.name, at, 'ARG_REPEAT_JOIN',
+          'repeat 与 join 互斥：一个产出多个元素，一个产出单个元素'))
+      }
+      if (binding.join !== undefined && binding.repeat) {
+        issues.push(fail(tool.name, at, 'ARG_DECORATION_CONFLICT',
+          'repeat 下 join 不会生效'))
+      }
+      if (binding.allowResponseFile && spec.type !== 'string' && spec.type !== 'array') {
+        issues.push(warn(tool.name, `${at}.allowResponseFile`, 'ARG_RESPONSE_FILE_TYPE',
+          'allowResponseFile 只对 string / array 参数有意义'))
+      }
+    }
+
+    if (binding.stdin === 'raw' && binding.repeat) {
+      issues.push(fail(tool.name, `${at}.stdin`, 'ARG_STDIN_RAW_REPEAT',
+        'stdin: "raw" 需要单个标量值，不能与 repeat 一起使用'))
+    }
+  })
+
+  if (stdinCount > 1) {
+    issues.push(fail(tool.name, path, 'ARG_STDIN_DUPLICATE',
+      `最多只能有一个 stdin 映射，当前有 ${stdinCount} 个`))
+  }
+
+  // Shell modes get their values positionally: `bash -c <source> <argv0> <args…>`
+  // exposes them as "$@", and everything after `pwsh -Command <source>` lands in
+  // $args. That is safe (no interpolation) and leaves the fixed source untouched,
+  // so no extra restriction is needed here beyond the global rules above.
+}
+
+function validateMode(tool, path, issues) {
+  const mode = tool.mode ?? 'executable'
+  const require = (field, message) => {
+    if (typeof tool[field] !== 'string' || tool[field].trim() === '') {
+      issues.push(fail(tool.name, `${path}.${field}`, 'MODE_FIELD_REQUIRED', message))
+    }
+  }
+  const forbid = (field, message) => {
+    if (tool[field] !== undefined && tool[field] !== '') {
+      issues.push(warn(tool.name, `${path}.${field}`, 'MODE_FIELD_IGNORED', message))
+    }
+  }
+
+  if (mode === 'executable') {
+    require('executable', 'executable 模式必须给出 executable')
+    forbid('interpreter', 'executable 模式下 interpreter 不生效')
+    forbid('script', 'executable 模式下 script 不生效')
+    forbid('command', 'executable 模式下 command 不生效')
+  } else if (mode === 'script') {
+    require('interpreter', 'script 模式必须给出 interpreter')
+    require('script', 'script 模式必须给出 script（绝对路径）')
+    forbid('executable', 'script 模式下 executable 不生效')
+    forbid('command', 'script 模式下 command 不生效')
+  } else {
+    require('command', `${mode} 模式必须给出固定的 command 源码`)
+    forbid('executable', `${mode} 模式下 executable 不生效`)
+    forbid('script', `${mode} 模式下 script 不生效`)
+  }
+
+  if (tool.scriptSha256 !== undefined && tool.scriptSha256 !== ''
+    && !/^[0-9a-f]{64}$/.test(tool.scriptSha256)) {
+    issues.push(fail(tool.name, `${path}.scriptSha256`, 'SCRIPT_HASH_FORMAT',
+      'scriptSha256 必须是 64 位小写十六进制 SHA-256'))
+  }
+  if (mode !== 'script' && tool.scriptSha256) {
+    issues.push(warn(tool.name, `${path}.scriptSha256`, 'SCRIPT_HASH_IGNORED',
+      'scriptSha256 只在 script 模式下生效'))
+  }
+}
+
+export function validateTool(tool, path = 'tools[0]') {
+  const issues = []
+
+  if (!isPlainObject(tool)) {
+    issues.push(fail(undefined, path, 'TOOL_SHAPE', '每个工具必须是对象'))
+    return issues
+  }
+
+  if (typeof tool.name !== 'string' || !NAME_PATTERN.test(tool.name)) {
+    issues.push(fail(tool.name, `${path}.name`, 'TOOL_NAME_FORMAT',
+      '工具名必须匹配 ^[a-z][a-z0-9_]{0,40}$'))
+  } else if (RESERVED_NAMES.has(tool.name)) {
+    issues.push(fail(tool.name, `${path}.name`, 'TOOL_NAME_RESERVED',
+      `${tool.name} 是保留名，请换一个`))
+  }
+
+  if (typeof tool.description !== 'string' || tool.description.trim() === '') {
+    issues.push(fail(tool.name, `${path}.description`, 'TOOL_DESCRIPTION_REQUIRED',
+      'description 不能为空：它是模型决定是否调用这个工具的唯一依据'))
+  }
+
+  if (tool.timeoutMs !== undefined
+    && (tool.timeoutMs < 1000 || tool.timeoutMs > 600000)) {
+    issues.push(fail(tool.name, `${path}.timeoutMs`, 'TIMEOUT_RANGE',
+      'timeoutMs 必须在 1000..600000 之间'))
+  }
+
+  if (isPlainObject(tool.env)) {
+    for (const key of Object.keys(tool.env)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        issues.push(fail(tool.name, `${path}.env.${key}`, 'ENV_KEY_FORMAT',
+          `环境变量名 ${key} 不合法`))
+      }
+    }
+  }
+
+  if (isPlainObject(tool.parameters)) {
+    for (const [paramName, spec] of Object.entries(tool.parameters)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(paramName)) {
+        issues.push(fail(tool.name, `${path}.parameters.${paramName}`, 'PARAMETER_NAME',
+          `参数名 ${paramName} 必须是合法标识符`))
+        continue
+      }
+      validateParameter(tool.name, paramName, spec, `${path}.parameters.${paramName}`, issues)
+    }
+  }
+
+  if (Array.isArray(tool.credentials)) {
+    const seen = new Set()
+    tool.credentials.forEach((binding, index) => {
+      const at = `${path}.credentials[${index}]`
+      if (!isPlainObject(binding)) {
+        issues.push(fail(tool.name, at, 'CREDENTIAL_SHAPE', '凭据条目必须是对象'))
+        return
+      }
+      if (typeof binding.env !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(binding.env)) {
+        issues.push(fail(tool.name, `${at}.env`, 'CREDENTIAL_ENV',
+          '凭据的 env 必须是合法环境变量名'))
+      } else if (seen.has(binding.env)) {
+        issues.push(fail(tool.name, `${at}.env`, 'CREDENTIAL_DUPLICATE',
+          `凭据注入 ${binding.env} 重复声明`))
+      } else {
+        seen.add(binding.env)
+      }
+      if (typeof binding.ref !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(binding.ref)) {
+        issues.push(fail(tool.name, `${at}.ref`, 'CREDENTIAL_REF',
+          '凭据 ref 必须是合法引用名（字母/数字/下划线，不以数字开头）'))
+      }
+      if (isPlainObject(tool.env) && binding.env in tool.env) {
+        issues.push(fail(tool.name, `${at}.env`, 'CREDENTIAL_ENV_CONFLICT',
+          `${binding.env} 同时出现在 env 与 credentials 里，隐式覆盖会让凭据失效排查变难`))
+      }
+    })
+  }
+
+  if (isPlainObject(tool.output)) {
+    if (tool.output.parse === 'json' && tool.output.schema !== undefined
+      && tool.output.schema !== '') {
+      const parsed = tryParseJson(tool.output.schema)
+      if (!parsed.ok) {
+        issues.push(fail(tool.name, `${path}.output.schema`, 'OUTPUT_SCHEMA_JSON',
+          `output.schema 不是合法 JSON：${parsed.error}`))
+      }
+    }
+    if (tool.output.parse !== 'json' && tool.output.schema) {
+      issues.push(warn(tool.name, `${path}.output.schema`, 'OUTPUT_SCHEMA_IGNORED',
+        'output.schema 只在 parse: json 时生效'))
+    }
+  }
+
+  if (Array.isArray(tool.examples)) {
+    tool.examples.forEach((example, index) => {
+      const at = `${path}.examples[${index}]`
+      if (!isPlainObject(example)) {
+        issues.push(fail(tool.name, at, 'EXAMPLE_SHAPE', '示例必须是对象'))
+        return
+      }
+      if (typeof example.name !== 'string' || example.name.trim() === '') {
+        issues.push(fail(tool.name, `${at}.name`, 'EXAMPLE_NAME', '示例必须有名字'))
+      }
+      const parsed = tryParseJson(example.args)
+      if (!parsed.ok) {
+        issues.push(fail(tool.name, `${at}.args`, 'EXAMPLE_ARGS_JSON',
+          `示例参数不是合法 JSON：${parsed.error}`))
+      } else if (parsed.value !== undefined && !isPlainObject(parsed.value)) {
+        issues.push(fail(tool.name, `${at}.args`, 'EXAMPLE_ARGS_OBJECT',
+          '示例参数必须是 JSON 对象'))
+      } else if (parsed.value !== undefined) {
+        const declared = isPlainObject(tool.parameters) ? tool.parameters : {}
+        for (const key of Object.keys(parsed.value)) {
+          if (!(key in declared)) {
+            issues.push(fail(tool.name, `${at}.args.${key}`, 'EXAMPLE_ARGS_UNKNOWN',
+              `示例用了未声明的参数 ${key}`))
+          }
+        }
+      }
+    })
+  }
+
+  validateMode(tool, path, issues)
+  validateArgs(tool, path, issues)
+
+  return issues
+}
+
+/**
+ * Validate the whole snapshot. Duplicate names are reported once, on the second
+ * and later occurrences, so the first one keeps working.
+ */
+export function validateSnapshot(snapshot) {
+  const tools = snapshot && Array.isArray(snapshot.tools) ? snapshot.tools : []
+  const issues = []
+  const seen = new Map()
+
+  tools.forEach((tool, index) => {
+    const path = `tools[${index}]`
+    issues.push(...validateTool(tool, path))
+
+    const name = isPlainObject(tool) ? tool.name : undefined
+    if (typeof name === 'string') {
+      if (seen.has(name)) {
+        issues.push(fail(name, `${path}.name`, 'TOOL_NAME_DUPLICATE',
+          `工具名 ${name} 与 tools[${seen.get(name)}] 重复；后一个不会被加载`))
+      } else {
+        seen.set(name, index)
+      }
+    }
+  })
+
+  return {
+    issues,
+    errors: issues.filter((issue) => issue.severity === 'error'),
+    warnings: issues.filter((issue) => issue.severity === 'warning'),
+  }
+}
+
+export default validateSnapshot
