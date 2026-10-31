@@ -1191,11 +1191,11 @@ window.__ModuleLoader__.load({
       const isArray = asString(piece.type) === 'array'
 
       const head = [
-        h(Select, {
-          key: 'kind',
-          value: piece.kind,
-          disabled,
-          options: PIECE_KINDS,
+        h('div', { key: 'kind', style: S.pieceKind },
+          h(Select, {
+            value: piece.kind,
+            disabled,
+            options: PIECE_KINDS,
           labels: PIECE_LABEL,
           onChange: (next) => {
             if (next === 'literal') onChange({ id: piece.id, kind: 'literal', text: '' })
@@ -1224,7 +1224,7 @@ window.__ModuleLoader__.load({
               })
             }
           },
-        }),
+        }))
       ]
 
       if (piece.kind === 'literal') {
