@@ -45,11 +45,44 @@ mode: bash
 command: 'printf "%s\n" "$@"'
 args: [{ arg: 'value' }]
 
-# powershell — a fixed script body; parameters arrive via stdin JSON.
+# powershell — a fixed script body; parameters arrive as positional $args,
+# or as JSON on stdin with { stdin: 'json' }.
 mode: powershell
-command: '$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json; $payload | ConvertTo-Json -Compress'
-args: [{ stdin: 'json' }]
+command: 'Write-Output $args[0]'
+args: [{ arg: 'value' }]
 ```
+
+## Shell binaries on Windows
+
+`mode: bash` and `mode: powershell` start a shell. Both default to the name on
+`PATH` (`bash`, `pwsh`), and both accept `executable` to pin an installation:
+
+```yaml
+mode: bash
+executable: C:/Program Files/Git/bin/bash.exe
+command: 'printf "%s\n" "$@"'
+```
+
+That matters on Windows, where `bash` on `PATH` is usually
+`C:\Windows\System32\bash.exe` — the WSL launcher. It resolves, then cannot start
+inside a confined run and dies with an opaque `E_ACCESSDENIED`. So when a
+`mode: bash` tool leaves `executable` unset and `bash` resolves to that launcher
+or to the Microsoft Store alias, the plugin looks for a real bash in this order,
+derived only from the deployment environment:
+
+1. `<git>/bin/bash.exe` next to the `git` on `PATH`, then `<git>/usr/bin/bash.exe`
+2. `%ProgramFiles%\Git`, `%ProgramW6432%\Git`, `%ProgramFiles(x86)%\Git`
+3. `%USERPROFILE%\scoop\apps\git\current`, `%USERPROFILE%\scoop\apps\msys2\current`
+4. `%LOCALAPPDATA%\Programs\Git`, `%MSYS2_ROOT%`
+5. `C:\msys64\usr\bin\bash.exe`
+
+If none of them exists the call fails with `EXECUTABLE_NOT_FOUND` and says which
+bash is missing. A model argument never influences this choice, and an explicit
+`executable` always wins.
+
+`mode: powershell` defaults to `pwsh` and falls back to `powershell.exe`
+(Windows PowerShell 5.1) when PowerShell 7 is not installed. `/custom-tools
+preview <name> --param k=v` prints the absolute path that will actually run.
 
 ## Parameters and argv
 

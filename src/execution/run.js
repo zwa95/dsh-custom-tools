@@ -18,11 +18,30 @@ import { emptySandbox, failure, success } from '../result/contract.js'
 import { hintFor, classifyExit } from './classify.js'
 import { stricter, isFullAccess, confinementPolicy } from './sandbox.js'
 import { encodingDefaultsFor, interpreterKey, mergeEncodingEnv, withArgvPrefix } from './encoding.js'
+import { bashCandidates, isStubBash, POWERSHELL_FALLBACK } from './interpreters.js'
 import { validateJsonSubset } from './jsonschema.js'
 
 const STDOUT_LIMIT = 1_000_000
 const STDERR_LIMIT = 256_000
 const GRACE_MS = 3000
+
+/**
+ * A few Windows programs (the WSL launcher among them) write UTF-16LE straight
+ * to the console. Read as UTF-8 that becomes NUL-interleaved garbage, which
+ * hides the only useful part of the message. Re-decode when the text is mostly
+ * NUL padding; every byte of ASCII survives, and characters the UTF-8 decode
+ * already replaced are lost either way.
+ */
+function decodeWideText(text) {
+  if (text.length < 4) return text
+  let nul = 0
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) === 0) nul += 1
+  }
+  if (nul / text.length < 0.15) return text
+  const decoded = Buffer.from(text, 'latin1').toString('utf16le')
+  return decoded.includes('\u0000') ? text : decoded
+}
 
 function readStream(collector, offset = 0) {
   if (!collector || typeof collector.readFrom !== 'function') {
@@ -30,7 +49,7 @@ function readStream(collector, offset = 0) {
   }
   const read = collector.readFrom(offset) ?? {}
   return {
-    text: typeof read.text === 'string' ? read.text : '',
+    text: decodeWideText(typeof read.text === 'string' ? read.text : ''),
     lossy: read.lossy === true,
     spillPath: read.spillPath,
   }
@@ -156,18 +175,48 @@ export async function runCustomTool(services, compiled, rawArgs, exec = {}, opti
 
   const resolved = {}
   const targetName = plan.mode === 'script' ? plan.interpreter : plan.executable
+  const usesDefaultBash = plan.mode === 'bash' && plan.executable === 'bash'
+  const usesDefaultPwsh = plan.mode === 'powershell' && plan.executable === 'pwsh'
   const resolvedTarget = await resolveExecutable(targetName, 'EXECUTABLE_NOT_FOUND')
-  if (resolvedTarget.error) {
+
+  if (resolvedTarget.error === 'CUSTOM_TOOL_INTERNAL') {
+    return failWith('CUSTOM_TOOL_INTERNAL', resolvedTarget.detail ?? 'subprocess 服务不可用')
+  }
+
+  let interpreterPath = resolvedTarget.error ? undefined : resolvedTarget.path
+
+  // Windows ships `bash` as the WSL launcher: it resolves, then dies inside a
+  // confined run with an opaque E_ACCESSDENIED. Look for a real bash instead.
+  if (usesDefaultBash && interpreterPath !== undefined && isStubBash(interpreterPath)) {
+    interpreterPath = undefined
+    // `process.env` (not the scrubbed DSH_* facts) is the deployment environment
+    // these install roots are found in.
+    const git = await resolveExecutable('git', 'EXECUTABLE_NOT_FOUND')
+    const candidates = bashCandidates(process.env, git.error ? undefined : git.path)
+    if (candidates.length > 0) interpreterPath = candidates[0]
+  }
+
+  if (usesDefaultBash && interpreterPath === undefined) {
+    return failWith('EXECUTABLE_NOT_FOUND',
+      'PATH 上的 bash 是 WSL 启动器，找不到可用的 bash；'
+      + '请设置 executable 指向 Git Bash 或 MSYS2 的 bash.exe')
+  }
+
+  // PowerShell 7 is not on every Windows box; Windows PowerShell 5.1 ships with
+  // the OS and takes the same -Command shape we emit.
+  if (usesDefaultPwsh && interpreterPath === undefined) {
+    const fallback = await resolveExecutable(POWERSHELL_FALLBACK, 'EXECUTABLE_NOT_FOUND')
+    if (!fallback.error) interpreterPath = fallback.path
+  }
+
+  if (interpreterPath === undefined) {
     if (resolvedTarget.error === 'EXECUTABLE_NOT_FOUND') {
       return failWith('EXECUTABLE_NOT_FOUND', `找不到可执行文件 ${targetName}`)
     }
-    if (resolvedTarget.error === 'CUSTOM_TOOL_INTERNAL') {
-      return failWith('CUSTOM_TOOL_INTERNAL', resolvedTarget.detail ?? 'subprocess 服务不可用')
-    }
     return failWith(resolvedTarget.error, `解析可执行文件失败：${resolvedTarget.detail ?? ''}`)
   }
-  if (plan.mode === 'script') resolved.interpreter = resolvedTarget.path
-  else resolved.executable = resolvedTarget.path
+  if (plan.mode === 'script') resolved.interpreter = interpreterPath
+  else resolved.executable = interpreterPath
 
   if (plan.mode === 'script') {
     if (!isFile(plan.script)) {

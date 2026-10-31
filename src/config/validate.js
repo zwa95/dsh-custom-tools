@@ -285,7 +285,9 @@ function validateMode(tool, path, issues) {
     forbid('command', 'script 模式下 command 不生效')
   } else {
     require('command', `${mode} 模式必须给出固定的 command 源码`)
-    forbid('executable', `${mode} 模式下 executable 不生效`)
+    // `executable` is the shell binary: it defaults to `bash`/`pwsh` on PATH and
+    // may be pointed at a specific installation when PATH has the wrong one.
+    forbid('interpreter', `${mode} 模式下请用 executable 指定 shell，interpreter 不生效`)
     forbid('script', `${mode} 模式下 script 不生效`)
   }
 
