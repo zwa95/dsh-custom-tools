@@ -149,6 +149,15 @@ test('the JSON textareas survive parent re-renders', () => {
  * run, which is worse than showing nothing. This compares them on a matrix of
  * definitions instead of trusting that the port stayed in sync.
  */
+function canon(value) {
+  if (Array.isArray(value)) return `[${value.map(canon).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const keys = Object.keys(value).sort()
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canon(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value ?? null)
+}
+
 function clientInternals() {
   const exportsObject = loadBundle().factory((name) => {
     if (name === 'react') return fakeReact()
@@ -359,29 +368,242 @@ const PARITY_CASES = [
   },
 ]
 
-test('the page previews the same argv the host would spawn', async () => {
+test('editing a piece never loses a field of the definition', async () => {
   const internals = clientInternals()
   const { compile } = await import('../src/compiler/compile.js')
   const { buildInvocation } = await import('../src/compiler/bindings.js')
 
+  // The page edits one ordered piece list; the document stores args[] plus
+  // parameters{} in parallel. Everything below has to survive that trip:
+  // otherwise "open the card, touch nothing, save" quietly rewrites the tool.
+  // Key order carries no meaning in JSON, so the comparison sorts keys.
   for (const fixture of PARITY_CASES) {
-    let plan = fixture.plan
-    if (plan === undefined) {
-      const compiled = compile({ tools: [fixture.spec] })
-      const entry = compiled.tools.get(fixture.spec.name)
-      assert.ok(entry, `${fixture.label}: the fixture must compile`)
-      plan = entry.plan
-    }
-    const expected = buildInvocation(plan, fixture.values)
-    const actual = internals.previewInvocation(fixture.spec, fixture.values)
-    // Cross-realm objects: compare data, not prototypes.
+    const pieces = internals.piecesOf(fixture.spec)
+    const rebuilt = internals.applyPieces(fixture.spec, pieces)
+
     assert.equal(
-      JSON.stringify({ ok: actual.ok, argv: actual.argv, stdin: actual.stdin }),
-      JSON.stringify({ ok: expected.ok, argv: expected.argv, stdin: expected.stdin }),
-      `preview drifted from buildInvocation for: ${fixture.label}`,
+      canon({ args: rebuilt.args, parameters: rebuilt.parameters }),
+      canon({
+        args: fixture.spec.args ?? [],
+        parameters: fixture.spec.parameters ?? {},
+      }),
+      `piecesOf/applyPieces drifted for: ${fixture.label}`,
     )
-    if (fixture.expectError) assert.equal(actual.ok, false, fixture.label)
+
+    // A definition the host refuses to compile (PowerShell with positional
+    // arguments) cannot round-trip through compile; it still has to round-trip
+    // through the page. Everything else compiles and may still be refused at
+    // invocation time (a value the page also has to warn about).
+    const compiled = compile({ tools: [rebuilt] })
+    const entry = compiled.tools.get(rebuilt.name)
+    if (fixture.expectError) {
+      const plan = fixture.plan ?? entry?.plan
+      assert.ok(plan, `${fixture.label}: need a plan to prove the refusal`)
+      assert.equal(buildInvocation(plan, fixture.values).ok, false, fixture.label)
+      continue
+    }
+    assert.ok(entry, `${fixture.label}: the rebuilt definition must compile`)
+    const expected = buildInvocation(fixture.plan ?? entry.plan, fixture.values)
+    assert.equal(expected.ok, true, `${fixture.label}: ${JSON.stringify(expected.errors ?? [])}`)
   }
+})
+
+test('the page reads back parameters it does not edit', () => {
+  const internals = clientInternals()
+  const spec = {
+    name: 'bounded',
+    description: 'x',
+    mode: 'executable',
+    executable: 'git',
+    args: [{ arg: 'count', prefix: '--count=' }],
+    parameters: {
+      count: { type: 'integer', min: 1, max: 9, description: 'how many' },
+    },
+  }
+  const rebuilt = internals.applyPieces(spec, internals.piecesOf(spec))
+  // min/max are not in the form, but opening the card must not drop them.
+  assert.equal(rebuilt.parameters.count.min, 1)
+  assert.equal(rebuilt.parameters.count.max, 9)
+  assert.equal(rebuilt.parameters.count.description, 'how many')
+  assert.equal(rebuilt.parameters.count.type, 'integer')
+})
+
+const PREVIEW_CASES = [
+  {
+    label: 'pure literals',
+    spec: {
+      name: 'git_status',
+      description: 'x',
+      mode: 'executable',
+      executable: 'git',
+      args: [{ literal: 'status' }, { literal: '--short' }],
+    },
+    values: {},
+  },
+  {
+    label: 'one variable slot',
+    spec: {
+      name: 'cat_file',
+      description: 'x',
+      mode: 'executable',
+      executable: 'cat',
+      args: [{ arg: 'path' }],
+      parameters: { path: { type: 'string', required: true } },
+    },
+    values: { path: 'a.txt' },
+  },
+  {
+    label: 'prefix keeps one slot',
+    spec: {
+      name: 'globbed',
+      description: 'x',
+      mode: 'executable',
+      executable: 'rg',
+      args: [{ arg: 'glob', prefix: '--glob=' }],
+      parameters: { glob: { type: 'string', required: true } },
+    },
+    values: { glob: '*.js' },
+  },
+  {
+    label: 'a true flag is one element',
+    spec: {
+      name: 'sorted',
+      description: 'x',
+      mode: 'executable',
+      executable: 'sort',
+      args: [{ flag: 'reverse', as: '--reverse' }],
+      parameters: { reverse: { type: 'boolean' } },
+    },
+    values: { reverse: true },
+  },
+  {
+    label: 'join keeps one element',
+    spec: {
+      name: 'joined',
+      description: 'x',
+      mode: 'executable',
+      executable: 'echo',
+      args: [{ arg: 'paths', join: ',' }],
+      parameters: { paths: { type: 'array', items: 'string', required: true } },
+    },
+    values: { paths: ['a', 'b'] },
+  },
+  {
+    label: 'script mode',
+    spec: {
+      name: 'py_tool',
+      description: 'x',
+      mode: 'script',
+      interpreter: 'python',
+      script: 'C:/tools/report.py',
+      args: [{ arg: 'path' }],
+      parameters: { path: { type: 'string', required: true } },
+    },
+    values: { path: 'package.json' },
+  },
+  {
+    label: 'bash mode with the argv0 placeholder',
+    spec: {
+      name: 'sh_tool',
+      description: 'x',
+      mode: 'bash',
+      command: 'echo "$@"',
+      args: [{ arg: 'value' }],
+      parameters: { value: { type: 'string', required: true } },
+    },
+    values: { value: 'hello' },
+  },
+  {
+    label: 'powershell mode reads stdin',
+    spec: {
+      name: 'ps_tool',
+      description: 'x',
+      mode: 'powershell',
+      command: 'Get-Date',
+      args: [{ stdin: 'json' }],
+      parameters: { drive: { type: 'string', required: true } },
+    },
+    values: { drive: 'C' },
+  },
+]
+
+test('the preview draws exactly one box per argv element', async () => {
+  const internals = clientInternals()
+  const { compile } = await import('../src/compiler/compile.js')
+  const { buildInvocation } = await import('../src/compiler/bindings.js')
+
+  // The strip never shows values, so it cannot be compared element by element.
+  // It can be compared by *shape*: the number of boxes must equal the number of
+  // argv elements the host would spawn for the same definition.
+  for (const fixture of PREVIEW_CASES) {
+    const compiled = compile({ tools: [fixture.spec] })
+    const entry = compiled.tools.get(fixture.spec.name)
+    assert.ok(entry, `${fixture.label}: the fixture must compile`)
+    const invocation = buildInvocation(entry.plan, fixture.values)
+    assert.equal(invocation.ok, true, `${fixture.label}: ${JSON.stringify(invocation.errors ?? [])}`)
+
+    const preview = internals.previewOf(fixture.spec, internals.piecesOf(fixture.spec))
+    assert.equal(
+      preview.argv.length,
+      invocation.argv.length,
+      `preview shape drifted from buildInvocation for: ${fixture.label}`,
+    )
+    assert.equal(
+      preview.argv.filter((item) => item.absent !== true).length,
+      invocation.argv.length,
+      `a phantom box appeared for: ${fixture.label}`,
+    )
+    assert.equal(
+      preview.stdin === null,
+      invocation.stdin === undefined,
+      `stdin detection drifted for: ${fixture.label}`,
+    )
+  }
+})
+
+test('a repeated value is one box plus an ellipsis box', () => {
+  const internals = clientInternals()
+  const spec = {
+    name: 'repeated',
+    description: 'x',
+    mode: 'executable',
+    executable: 'echo',
+    args: [{ arg: 'paths', repeat: true }],
+    parameters: { paths: { type: 'array', items: 'string', required: true } },
+  }
+
+  // One value can become any number of argv elements, and the strip draws no
+  // values at all, so it says "one or more" instead of pretending to know.
+  const preview = internals.previewOf(spec, internals.piecesOf(spec))
+  assert.equal(
+    Array.from(preview.argv, (item) => (item.absent === true ? 'ghost' : item.kind)).join(','),
+    'prog,variable,ghost',
+  )
+})
+
+test('the preview shows which variables a stdin JSON object would carry', () => {
+  const internals = clientInternals()
+  const spec = {
+    name: 'ps_tool',
+    description: 'x',
+    mode: 'powershell',
+    command: 'Get-Date',
+    args: [{ stdin: 'json' }],
+    parameters: {
+      drive: { type: 'string', required: true },
+      days: { type: 'integer' },
+    },
+  }
+  const preview = internals.previewOf(spec, internals.piecesOf(spec))
+  assert.deepEqual([...preview.stdin.names], ['drive', 'days'])
+  // No positional element: -Command already took the tail.
+  assert.equal(preview.argv.some((item) => item.kind === 'variable'), false)
+})
+
+test('a variable slot is drawn with its decoration, never with a value', () => {
+  const internals = clientInternals()
+  assert.equal(internals.slotText({ name: 'glob', prefix: '--glob=', suffix: '.js' }), '--glob=<glob>.js')
+  assert.equal(internals.slotText({ name: 'path' }), '<path>')
 })
 
 test('the page reports the same problems the host validator would refuse', () => {

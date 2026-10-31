@@ -60,17 +60,31 @@ args: [{ stdin: 'json' }]
 ## The settings page
 
 Each tool is one collapsible card. Inside, the form is split by concern: identity, command
-(target field depends on the mode), argument bindings, parameters, execution, and a free-form
-advanced block for `env`/`credentials`/`examples`.
+(target field depends on the mode), **execution preview**, **argument pieces**, execution, and a
+free-form advanced block for `env`/`credentials`/`examples`.
+
+There is one ordered list of *pieces*, not a parameter table plus a binding table:
+
+- **literal** — text that is always there, e.g. `--json`.
+- **variable** — one model-filled value, drawn as `<name>`. It declares its own type, required
+  flag, default and description, so a variable cannot exist without a parameter and a parameter
+  cannot be declared but never used.
+- **switch** — a boolean the model may turn on. Drawn with a dashed frame because it may or may
+  not be present.
+- **stdin** — hand the parameters over as one JSON object instead of argv. PowerShell always does
+  this (`-Command` never binds `$args`), so the control only appears where it means something.
 
 Two things are worth knowing:
 
-- The **argv strip** under the bindings shows what the model's values would become — one chip per
-  argv element, plus a separate chip for stdin. It is computed in the page with the same rules the
-  host uses; a parity test replays 18 definitions through both implementations so the drawing
-  cannot drift from what actually spawns.
+- The **preview** shows the *shape* of the command — one box per argv element, colored by kind,
+  never a value — so it stays honest about what will run without inventing sample data. It is
+  computed in the page with the same rules the host uses; tests replay a definition matrix through
+  both the page and `buildInvocation` so the drawing cannot drift from what actually spawns.
 - The card **diagnoses itself** with the validator's rules as you type. Save is disabled while an
   error stands, and the revision chip tells you whether the document moved underneath you.
+
+Fields the page does not edit (`min`, `max`, `minLength`, `maxLength`) are carried through
+untouched: opening a card and saving must never rewrite a definition you did not change.
 
 The page cannot run anything. A browser has no channel to the host process, so `preview` and
 `test` stay in the session as `/custom-tools` subcommands.

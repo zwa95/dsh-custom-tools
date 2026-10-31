@@ -11,15 +11,23 @@
  *
  *   - The page cannot *run* anything. There is no client→host call channel for
  *     arbitrary plugins, so `preview` and `test` stay in the `/custom-tools`
- *     command family. The argv strip below is a local projection of the same
- *     binding rules; `test/client.test.js` proves it agrees with
- *     `src/compiler/bindings.js`, so it cannot quietly start lying.
+ *     command family. The strip under the command form is a local projection
+ *     of the same binding rules — it shows the *shape* of argv (one box per
+ *     real element), never a value, because the page never sees the model's
+ *     arguments.
  *   - The page is the only place a broken tool definition becomes visible
  *     before it fails at call time, so it validates on every keystroke and
  *     says which field is wrong.
  *
  * Writes carry the revision they were read at, so a browser tab that was open
  * while something else saved gets a conflict instead of silently reverting it.
+ *
+ * Model of the editor: the persisted shape is `args[] + parameters{}` (two
+ * parallel structures). The page edits a single ordered list of *pieces* —
+ * literal, variable, flag, stdin — where a variable or flag declares its own
+ * parameter inline. `piecesOf` / `applyPieces` convert between the two, and
+ * they are exported for tests because that conversion is the one place where a
+ * label could silently eat a field.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-custom-tools',
@@ -55,8 +63,22 @@ window.__ModuleLoader__.load({
       mono: '12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     }
 
+    /**
+     * The preview colours are literal, not theme aliases: they encode "which
+     * part of argv is this", and a semantic token would collapse them onto the
+     * same grey in one of the two themes.
+     */
+    const TONE = {
+      prog: '#78a9ff',
+      script: '#56b6c2',
+      lit: '#b9c0d4',
+      variable: '#9ece6a',
+      flag: '#bb9af7',
+      stdin: '#e0af68',
+    }
+
     const S = {
-      wrap: { display: 'grid', gap: 12, maxWidth: 860 },
+      wrap: { display: 'grid', gap: 12, maxWidth: 900 },
       header: { display: 'grid', gap: 4 },
       titleRow: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
       title: { margin: 0, fontSize: 15, fontWeight: 600, color: C.textPrimary },
@@ -79,12 +101,7 @@ window.__ModuleLoader__.load({
         cursor: 'pointer',
         userSelect: 'none',
       },
-      twist: {
-        width: 12,
-        fontSize: 9,
-        color: C.textTertiary,
-        transition: 'transform .12s',
-      },
+      twist: { width: 12, fontSize: 9, color: C.textTertiary, transition: 'transform .12s' },
       cardName: { font: C.mono, fontWeight: 600, color: C.textPrimary },
       cardBody: { padding: '2px 12px 12px', borderTop: `1px solid ${C.borderL1}` },
       panel: { padding: '10px 0', borderBottom: `1px solid ${C.borderL1}` },
@@ -92,6 +109,7 @@ window.__ModuleLoader__.load({
       panelHead: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 },
       panelTitle: { fontSize: 12, fontWeight: 600, color: C.textSecondary, letterSpacing: '.02em' },
       panelMeta: { fontSize: 11, color: C.textTertiary },
+      panelBody: { display: 'grid', gap: 8 },
       grid2: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 },
       grid3: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 },
       field: { display: 'grid', gap: 3, fontSize: 12, minWidth: 0 },
@@ -123,7 +141,7 @@ window.__ModuleLoader__.load({
         font: C.mono,
         outline: 'none',
       },
-      textarea: {
+      area: {
         boxSizing: 'border-box',
         width: '100%',
         minHeight: 64,
@@ -136,12 +154,67 @@ window.__ModuleLoader__.load({
         resize: 'vertical',
         outline: 'none',
       },
+      select: {
+        boxSizing: 'border-box',
+        width: '100%',
+        minWidth: 0,
+        minHeight: 28,
+        padding: '3px 6px',
+        borderRadius: C.radiusSmall,
+        border: `1px solid ${C.borderL1}`,
+        background: C.bg3,
+        color: 'inherit',
+        font: 'inherit',
+      },
+      status: { margin: 0, fontSize: 12, color: C.textSecondary },
+      error: { margin: 0, fontSize: 12, color: C.error },
+      grow: { flex: 1 },
+      chip: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '1px 7px',
+        borderRadius: 999,
+        border: `1px solid ${C.borderL1}`,
+        fontSize: 11,
+        lineHeight: 1.7,
+        color: C.textSecondary,
+        whiteSpace: 'nowrap',
+      },
+      chipDirty: { borderColor: TONE.stdin, color: TONE.stdin },
+      chipBad: { borderColor: C.error, color: C.error },
+      chipOk: { borderColor: C.success, color: C.success },
+      chipMode: { borderColor: C.borderL2, color: C.textSecondary },
+      banner: {
+        display: 'flex',
+        gap: 8,
+        alignItems: 'flex-start',
+        padding: '8px 10px',
+        borderRadius: C.radiusSmall,
+        border: `1px solid ${C.borderL1}`,
+        background: C.bg2,
+        fontSize: 12,
+        color: C.textSecondary,
+        lineHeight: 1.6,
+      },
+      bannerOk: { borderColor: C.success },
+      bannerBad: { borderColor: C.error },
+      empty: {
+        display: 'grid',
+        gap: 4,
+        padding: '18px 14px',
+        borderRadius: C.radius,
+        border: `1px dashed ${C.borderL1}`,
+        fontSize: 12,
+        color: C.textSecondary,
+        lineHeight: 1.6,
+      },
       button: {
         boxSizing: 'border-box',
         minHeight: 28,
-        padding: '0 10px',
+        padding: '3px 12px',
         borderRadius: C.radiusSmall,
-        border: `1px solid ${C.borderL2}`,
+        border: `1px solid ${C.borderL1}`,
         background: C.bg2,
         color: C.textPrimary,
         font: 'inherit',
@@ -151,9 +224,9 @@ window.__ModuleLoader__.load({
       buttonPrimary: {
         boxSizing: 'border-box',
         minHeight: 28,
-        padding: '0 12px',
+        padding: '3px 14px',
         borderRadius: C.radiusSmall,
-        border: `1px solid ${C.brand}`,
+        border: '1px solid transparent',
         background: C.brand,
         color: '#fff',
         font: 'inherit',
@@ -164,131 +237,154 @@ window.__ModuleLoader__.load({
       buttonSmall: {
         boxSizing: 'border-box',
         minHeight: 24,
-        padding: '0 8px',
+        padding: '1px 9px',
         borderRadius: C.radiusSmall,
-        border: `1px solid ${C.borderL2}`,
+        border: `1px solid ${C.borderL1}`,
         background: 'transparent',
         color: C.textSecondary,
         font: 'inherit',
-        fontSize: 11,
+        fontSize: 11.5,
         cursor: 'pointer',
       },
       buttonDanger: {
         boxSizing: 'border-box',
         minHeight: 24,
-        padding: '0 8px',
+        padding: '1px 9px',
         borderRadius: C.radiusSmall,
-        border: `1px solid ${C.borderL1}`,
+        border: `1px solid ${C.error}`,
         background: 'transparent',
         color: C.error,
         font: 'inherit',
-        fontSize: 11,
+        fontSize: 11.5,
         cursor: 'pointer',
       },
-      disabled: { opacity: 0.5, cursor: 'default' },
-      chip: {
-        fontSize: 11,
-        color: C.textTertiary,
+      iconButton: {
+        boxSizing: 'border-box',
+        width: 26,
+        height: 26,
+        padding: 0,
+        borderRadius: C.radiusSmall,
         border: `1px solid ${C.borderL1}`,
-        borderRadius: 999,
-        padding: '1px 8px',
-        background: C.bg2,
-        whiteSpace: 'nowrap',
-      },
-      chipDirty: { color: C.warning, borderColor: C.warning, background: 'transparent' },
-      chipBad: { color: C.error, borderColor: C.error, background: 'transparent' },
-      chipOk: { color: C.success, borderColor: C.success, background: 'transparent' },
-      banner: {
-        display: 'flex',
-        gap: 8,
-        alignItems: 'flex-start',
-        padding: '8px 10px',
-        borderRadius: C.radius,
-        border: `1px solid ${C.borderL2}`,
-        background: C.bg2,
-        fontSize: 12,
-        lineHeight: 1.6,
-      },
-      bannerOk: { borderColor: C.success },
-      bannerBad: { borderColor: C.error },
-      grow: { flex: 1 },
-      status: { fontSize: 12, color: C.textTertiary },
-      error: { fontSize: 12, color: C.error },
-      empty: {
-        display: 'grid',
-        gap: 8,
-        justifyItems: 'start',
-        padding: '22px 16px',
-        fontSize: 13,
+        background: 'transparent',
         color: C.textSecondary,
-        border: `1px dashed ${C.borderL2}`,
-        borderRadius: C.radius,
+        font: 'inherit',
+        fontSize: 12,
+        cursor: 'pointer',
       },
-      // segments
-      seg: { display: 'inline-flex', border: `1px solid ${C.borderL1}`, borderRadius: C.radiusSmall, overflow: 'hidden' },
-      segButton: {
+      disabled: { opacity: 0.45, cursor: 'default' },
+      seg: {
+        display: 'inline-flex',
+        padding: 2,
+        gap: 2,
+        borderRadius: C.radiusSmall,
+        border: `1px solid ${C.borderL1}`,
+        background: C.bg2,
+      },
+      segItem: {
+        boxSizing: 'border-box',
+        padding: '2px 10px',
+        borderRadius: 4,
+        border: 'none',
+        background: 'transparent',
+        color: C.textSecondary,
         font: 'inherit',
         fontSize: 11.5,
-        padding: '3px 10px',
-        border: 'none',
-        borderRight: `1px solid ${C.borderL1}`,
-        background: 'transparent',
-        color: C.textTertiary,
         cursor: 'pointer',
       },
-      segButtonOn: { background: C.bg3, color: C.brand, fontWeight: 600 },
-      // parameter table
-      table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
-      th: {
-        textAlign: 'left',
-        fontWeight: 500,
-        fontSize: 10.5,
-        color: C.textTertiary,
-        textTransform: 'uppercase',
-        letterSpacing: '.04em',
-        padding: '0 4px 4px',
+      segItemOn: { background: C.bg3, color: C.textPrimary, fontWeight: 600 },
+      check: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: C.textSecondary },
+      switchWrap: { display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' },
+      switchTrack: {
+        position: 'relative',
+        width: 30,
+        height: 16,
+        borderRadius: 999,
+        background: C.bg3,
+        border: `1px solid ${C.borderL1}`,
+        transition: 'background .12s',
       },
-      td: { padding: '2px 4px', verticalAlign: 'top' },
-      // argv strip
-      argv: {
+      switchKnob: {
+        position: 'absolute',
+        top: 1,
+        left: 1,
+        width: 12,
+        height: 12,
+        borderRadius: 999,
+        background: C.textTertiary,
+        transition: 'left .12s, background .12s',
+      },
+      preview: {
         display: 'flex',
         flexWrap: 'wrap',
-        gap: 4,
-        padding: 8,
-        border: `1px solid ${C.borderL1}`,
+        gap: 5,
+        alignItems: 'center',
+        padding: '9px 10px',
         borderRadius: C.radiusSmall,
+        border: `1px solid ${C.borderL1}`,
+        background: C.bg2,
+        font: C.mono,
+        minHeight: 40,
+      },
+      previewEmpty: { fontSize: 11.5, color: C.textTertiary },
+      legend: { display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, color: C.textTertiary },
+      legendItem: { display: 'inline-flex', alignItems: 'center', gap: 4 },
+      legendDot: { width: 7, height: 7, borderRadius: 999 },
+      chipBox: {
+        display: 'inline-flex',
+        alignItems: 'baseline',
+        gap: 5,
+        padding: '1px 7px',
+        borderRadius: 4,
+        border: '1px solid transparent',
+        background: 'rgba(255,255,255,.04)',
+        whiteSpace: 'pre',
+      },
+      chipGhost: { borderStyle: 'dashed', borderColor: C.borderL2, opacity: 0.62 },
+      chipEmpty: { borderStyle: 'dashed', borderColor: C.borderL1, color: C.textTertiary },
+      pieceHead: { display: 'flex', gap: 6, alignItems: 'center' },
+      pieceKind: { width: 96, flex: 'none' },
+      pieceGrow: { flex: 1, minWidth: 0 },
+      pieceBody: { display: 'grid', gap: 8, padding: '9px 0 2px' },
+      pieces: { display: 'grid', gap: 6 },
+      piece: {
+        display: 'grid',
+        gap: 4,
+        padding: '7px 8px',
+        borderRadius: C.radiusSmall,
+        border: `1px solid ${C.borderL1}`,
         background: C.bg2,
       },
-      token: {
-        font: C.mono,
-        fontSize: 11.5,
-        padding: '1px 6px',
-        border: `1px solid ${C.borderL1}`,
-        borderRadius: 4,
-        background: C.bg1,
-        color: C.textPrimary,
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-all',
-        maxWidth: '100%',
-      },
-      tokenExe: { color: C.brand, borderColor: C.brand, fontWeight: 600 },
-      tokenStdin: { color: C.warning, borderColor: C.warning },
-      tokenArrow: { font: C.mono, color: C.textTertiary, alignSelf: 'center' },
-      // diagnostics
-      issues: { display: 'grid', gap: 2, margin: 0, padding: 0, listStyle: 'none', fontSize: 11.5 },
-      issueError: { display: 'flex', gap: 6, color: C.error },
-      issueWarn: { display: 'flex', gap: 6, color: C.warning },
-      issueOk: { display: 'flex', gap: 6, color: C.success },
-      bindingRow: {
+      options: {
         display: 'grid',
-        gap: 6,
-        padding: '6px 0',
-        borderBottom: `1px dashed ${C.borderL1}`,
+        gap: 3,
+        paddingTop: 2,
       },
-      bindingMain: { display: 'grid', gridTemplateColumns: 'minmax(88px, 120px) 1fr auto', gap: 6, alignItems: 'center' },
-      bindingAdvanced: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 6 },
-      checkRow: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: C.textSecondary },
-      sampleRow: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 6 },
+      optionsTitle: { fontSize: 11, color: C.textTertiary, letterSpacing: '.02em' },
+      option: {
+        display: 'grid',
+        gridTemplateColumns: '16px 1fr',
+        gap: 7,
+        alignItems: 'flex-start',
+        padding: '5px 7px',
+        borderRadius: 6,
+        background: 'rgba(255,255,255,.018)',
+        cursor: 'pointer',
+      },
+      optionOn: { background: 'rgba(76,141,255,.10)', border: '1px solid rgba(76,141,255,.35)' },
+      optionOff: { border: '1px solid transparent' },
+      optionTitle: { fontSize: 11.5, color: C.textPrimary, lineHeight: 1.5 },
+      optionDetail: { fontSize: 11, color: C.textTertiary, lineHeight: 1.55 },
+      code: {
+        font: C.mono,
+        fontSize: 10.5,
+        padding: '0 3px',
+        borderRadius: 3,
+        background: C.bg3,
+        color: C.textSecondary,
+      },
+      issues: { display: 'grid', gap: 2, fontSize: 11.5, color: C.error, lineHeight: 1.5 },
+      ok: { fontSize: 11.5, color: C.success },
+      note: { fontSize: 11.5, color: C.textTertiary, lineHeight: 1.6 },
     }
 
     // -------------------------------------------------------------- constants
@@ -306,16 +402,20 @@ window.__ModuleLoader__.load({
       always: '每次都要批准（always）',
     }
     const CONCURRENCY = ['exclusive', 'parallel']
+    const CONCURRENCY_LABEL = {
+      exclusive: 'exclusive（同一工具串行）',
+      parallel: 'parallel（允许重叠）',
+    }
     const PARSES = ['text', 'json']
     const PARAM_TYPES = ['string', 'number', 'integer', 'boolean', 'array']
     const PARAM_ITEMS = ['string', 'number', 'integer', 'boolean']
-    const BINDING_KINDS = ['literal', 'arg', 'flag', 'stdin-raw', 'stdin-json']
-    const BINDING_LABEL = {
-      literal: '固定值',
-      arg: '参数',
+
+    const PIECE_KINDS = ['literal', 'variable', 'flag', 'stdin']
+    const PIECE_LABEL = {
+      literal: '字面值',
+      variable: '变量',
       flag: '开关',
-      'stdin-raw': 'stdin（原始文本）',
-      'stdin-json': 'stdin（JSON）',
+      stdin: 'stdin（JSON）',
     }
 
     /**
@@ -333,7 +433,7 @@ window.__ModuleLoader__.load({
     const POWERSHELL_FLAGS = ['-NoLogo', '-NoProfile', '-NonInteractive']
     const NAME_PATTERN = /^[a-z][a-z0-9_]{0,40}$/u
     const isAbsolutePath = (value) =>
-      value.startsWith('/') || /^[A-Za-z]:[\/]/u.test(value) || value.startsWith('\\')
+      value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value) || value.startsWith('\\\\')
     const PARAM_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u
     const ENV_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u
 
@@ -418,243 +518,286 @@ window.__ModuleLoader__.load({
       return { ok: true, value: result.ok === true ? result.value : result }
     }
 
-    /** `describe()` returns a list, or occasionally a namespace map. */
     function namespaceList(value) {
-      const bag = value?.namespaces ?? value?.views ?? value
-      if (Array.isArray(bag)) return bag
-      if (isObject(bag)) return Object.values(bag)
+      if (Array.isArray(value)) return value
+      if (isObject(value)) return Object.values(value)
       return []
     }
 
     function findNamespace(value, ns) {
-      for (const view of namespaceList(value)) {
-        if (!isObject(view)) continue
-        if (view.ns === ns || view.namespace === ns || view.id === ns) return view
-      }
-      return undefined
+      return namespaceList(value).find((entry) => isObject(entry)
+        && (entry.ns === ns || entry.namespace === ns || entry.id === ns)) ?? null
     }
 
     const EMPTY_CONFIG = { tools: [], deferLoading: false }
 
     function readConfig(value) {
-      const source = isObject(value) ? value : {}
-      return {
-        tools: Array.isArray(source.tools) ? source.tools.filter(isObject).map((tool) => clone(tool)) : [],
-        deferLoading: source.deferLoading === true,
-      }
+      if (!isObject(value)) return { ...EMPTY_CONFIG, tools: [] }
+      const tools = Array.isArray(value.tools) ? value.tools.filter(isObject) : []
+      return { tools: clone(tools), deferLoading: value.deferLoading === true }
     }
 
-    // ----------------------------------------------------- argv projection
+    // ------------------------------------------------------- pieces <-> spec
 
     /**
-     * Mirror of `src/compiler/compile.js` for the fields `buildInvocation`
-     * reads. Kept separate from the caller so `previewInvocation` can be
-     * exercised on its own.
+     * One piece per argv slot, plus anything that rides on stdin. A variable or
+     * flag OWNS its parameter: there is no second table to keep in sync, which
+     * removes the classic "you bound a parameter you never declared" state.
+     *
+     * Parameters without a binding are surfaced as `orphan` pieces so that a
+     * save never silently drops them.
      */
-    function planOf(spec) {
-      const mode = asString(spec.mode, 'executable')
-      return {
-        mode,
-        executable: spec.executable
-          ?? (mode === 'bash' ? 'bash' : mode === 'powershell' ? 'pwsh' : undefined),
-        interpreter: spec.interpreter,
-        script: spec.script,
-        command: spec.command,
-        flags: mode === 'powershell' ? [...POWERSHELL_FLAGS] : [],
-        args: Array.isArray(spec.args) ? spec.args : [],
-      }
-    }
+    function piecesOf(tool) {
+      const bindings = Array.isArray(tool.args) ? tool.args : []
+      const parameters = isObject(tool.parameters) ? tool.parameters : {}
+      const claimed = new Set()
+      const pieces = []
 
-    const NUL = '\u0000'
-
-    function formatScalar(value) {
-      if (typeof value === 'string') return value
-      if (typeof value === 'boolean') return value ? 'true' : 'false'
-      if (typeof value === 'number') return String(value)
-      return String(value)
-    }
-
-    function guardValue(binding, value) {
-      if (value.includes(NUL)) return `参数 ${binding.arg ?? binding.flag} 的值不能包含 NUL 字节`
-      if (!binding.allowLeadingDash && value.startsWith('-')) {
-        return `参数 ${binding.arg ?? binding.flag} 的值以 - 开头，会被当成命令选项`
-      }
-      if (!binding.allowResponseFile && value.startsWith('@')) {
-        return `参数 ${binding.arg ?? binding.flag} 的值以 @ 开头，可能被当作 response file`
-      }
-      return undefined
-    }
-
-    function isEmptyValue(value) {
-      return value === undefined || value === null || value === ''
-        || (Array.isArray(value) && value.length === 0)
-    }
-
-    function emitArrayValue(binding, items, out, errors) {
-      if (binding.repeat) {
-        for (const item of items) {
-          const text = formatScalar(item)
-          const problem = guardValue(binding, text)
-          if (problem) {
-            errors.push(problem)
-            return
-          }
-          out.push(`${binding.prefix ?? ''}${text}${binding.suffix ?? ''}`)
-        }
-        return
-      }
-      const joined = binding.join === undefined
-        ? items.map(formatScalar).join(' ')
-        : items.map(formatScalar).join(binding.join)
-      const problem = items.length > 0 ? guardValue(binding, String(items[0])) : undefined
-      if (problem) {
-        errors.push(problem)
-        return
-      }
-      out.push(`${binding.prefix ?? ''}${joined}${binding.suffix ?? ''}`)
-    }
-
-    /**
-     * Byte-for-byte the same rules as `src/compiler/bindings.js`
-     * (`buildInvocation`), minus the preflight-resolved absolute paths — the
-     * page shows what the author configured. `test/client.test.js` compares
-     * this against the real compiler for a matrix of definitions, so a change
-     * on one side cannot silently desynchronise the preview from the spawn.
-     */
-    function previewInvocation(spec, values = {}) {
-      const plan = planOf(spec)
-      const errors = []
-      const positional = []
-      let stdin
-
-      for (const binding of plan.args) {
-        if (!isObject(binding)) continue
-
+      bindings.forEach((binding, index) => {
+        if (!isObject(binding)) return
+        const id = `b${index}`
         if (binding.stdin === 'json') {
-          stdin = { kind: 'json', text: JSON.stringify(values) }
-          continue
+          pieces.push({ id, kind: 'stdin' })
+          return
         }
-
         if (binding.literal !== undefined) {
-          positional.push(asString(binding.literal))
-          continue
+          pieces.push({ id, kind: 'literal', text: asString(binding.literal) })
+          return
         }
-
         if (binding.flag !== undefined) {
-          if (values[binding.flag] !== true) continue
-          const as = Array.isArray(binding.as) ? binding.as : [binding.as]
-          for (const element of as) {
-            if (typeof element !== 'string') {
-              errors.push(`flag ${binding.flag} 的 as 必须是字符串`)
-              continue
-            }
-            positional.push(element)
-          }
-          continue
+          const name = asString(binding.flag)
+          claimed.add(name)
+          const spec = isObject(parameters[name]) ? parameters[name] : {}
+          const as = Array.isArray(binding.as) ? binding.as : asString(binding.as)
+          pieces.push({
+            id,
+            kind: 'flag',
+            name,
+            as: Array.isArray(as) ? as.join(' ') : as,
+            originalAs: Array.isArray(as) ? [...as] : undefined,
+            description: asString(spec.description),
+            required: spec.required === true,
+            original: isObject(spec) ? clone(spec) : undefined,
+          })
+          return
         }
-
-        if (binding.arg === undefined) {
-          errors.push('arg 条目既没有 literal/flag 也没有 arg')
-          continue
+        if (binding.arg !== undefined) {
+          const name = asString(binding.arg)
+          claimed.add(name)
+          const spec = isObject(parameters[name]) ? parameters[name] : {}
+          pieces.push({
+            id,
+            kind: 'variable',
+            name,
+            rawStdin: binding.stdin === 'raw',
+            prefix: asString(binding.prefix),
+            prefixSet: binding.prefix !== undefined,
+            suffix: asString(binding.suffix),
+            suffixSet: binding.suffix !== undefined,
+            join: asString(binding.join),
+            joinSet: binding.join !== undefined,
+            repeat: binding.repeat === true,
+            json: binding.json === true,
+            omitIfEmpty: binding.omitIfEmpty === true,
+            allowLeadingDash: binding.allowLeadingDash === true,
+            allowResponseFile: binding.allowResponseFile === true,
+            type: asString(spec.type, 'string'),
+            items: asString(spec.items),
+            required: spec.required === true,
+            default: asString(spec.default),
+            description: asString(spec.description),
+            original: isObject(spec) ? clone(spec) : undefined,
+          })
         }
+      })
 
-        const raw = values[binding.arg]
-
-        if (binding.stdin === 'raw') {
-          if (raw === undefined || raw === null) {
-            if (binding.omitIfEmpty) continue
-            errors.push(`参数 ${binding.arg} 没有值可写入 stdin`)
-            continue
-          }
-          if (typeof raw === 'object') {
-            errors.push('stdin: "raw" 只接受标量或数组，不接受对象')
-            continue
-          }
-          stdin = {
-            kind: 'raw',
-            text: Array.isArray(raw) ? raw.map(formatScalar).join('\n') : formatScalar(raw),
-          }
-          continue
-        }
-
-        if (isEmptyValue(raw)) {
-          if (binding.omitIfEmpty) continue
-          if (raw === undefined) continue
-          if (Array.isArray(raw)) continue
-          positional.push(`${binding.prefix ?? ''}${binding.suffix ?? ''}`)
-          continue
-        }
-
-        if (binding.json) {
-          positional.push(`${binding.prefix ?? ''}${JSON.stringify(raw)}${binding.suffix ?? ''}`)
-          continue
-        }
-
-        if (Array.isArray(raw)) {
-          emitArrayValue(binding, raw, positional, errors)
-          continue
-        }
-
-        const text = formatScalar(raw)
-        const problem = guardValue(binding, text)
-        if (problem) {
-          errors.push(problem)
-          continue
-        }
-        positional.push(`${binding.prefix ?? ''}${text}${binding.suffix ?? ''}`)
+      for (const [name, spec] of Object.entries(parameters)) {
+        if (claimed.has(name)) continue
+        const parameter = isObject(spec) ? spec : {}
+        pieces.push({
+          id: `p:${name}`,
+          kind: 'variable',
+          orphan: true,
+          name,
+          rawStdin: false,
+          prefix: '',
+          suffix: '',
+          join: '',
+          repeat: false,
+          json: false,
+          omitIfEmpty: false,
+          allowLeadingDash: false,
+          allowResponseFile: false,
+          type: asString(parameter.type, 'string'),
+          items: asString(parameter.items),
+          required: parameter.required === true,
+          default: asString(parameter.default),
+          description: asString(parameter.description),
+          original: clone(parameter),
+        })
       }
 
-      if (errors.length > 0) return { ok: false, errors }
-
-      let argv
-      if (plan.mode === 'bash') {
-        argv = [plan.executable, '-c', plan.command, 'custom-tool', ...positional]
-      } else if (plan.mode === 'powershell') {
-        if (positional.length > 0) {
-          return {
-            ok: false,
-            errors: ['powershell 模式不能把参数放进 argv：-Command 之后的标记会被拼进命令文本；请改用 stdin（JSON）'],
-          }
-        }
-        argv = [plan.executable, ...plan.flags, '-Command', plan.command]
-      } else if (plan.mode === 'script') {
-        argv = [plan.interpreter, plan.script, ...positional]
-      } else {
-        argv = [plan.executable, ...positional]
-      }
-
-      const cleaned = []
-      for (const element of argv) {
-        if (typeof element !== 'string') return { ok: false, errors: ['argv 元素必须是字符串'] }
-        if (element.includes(NUL)) return { ok: false, errors: ['argv 元素不能包含 NUL 字节'] }
-        cleaned.push(element)
-      }
-
-      return stdin === undefined ? { ok: true, argv: cleaned } : { ok: true, argv: cleaned, stdin }
+      return pieces
     }
 
-    /** A plausible value per declared parameter, so the strip shows its shape. */
-    function sampleValue(spec) {
-      if (!isObject(spec)) return '<value>'
-      if (spec.default !== undefined && spec.default !== '') {
-        const parsed = tryParseJson(spec.default)
-        if (parsed.ok) return parsed.value
-      }
-      if (spec.type === 'boolean') return false
-      if (spec.type === 'number' || spec.type === 'integer') return 0
-      if (spec.type === 'array') return []
-      return '<value>'
+    /** Rebuild a parameter, keeping fields this page does not edit (min/max…). */
+    function parameterOf(piece, type) {
+      const base = isObject(piece.original) ? clone(piece.original) : {}
+      const parameter = { ...base, type }
+      if (type === 'array' && asString(piece.items) !== '') parameter.items = asString(piece.items)
+      else delete parameter.items
+      if (piece.required === true) parameter.required = true
+      else delete parameter.required
+      const description = asString(piece.description)
+      if (description.trim() !== '') parameter.description = description
+      else delete parameter.description
+      const fallback = asString(piece.default)
+      if (fallback !== '') parameter.default = fallback
+      else delete parameter.default
+      return parameter
     }
 
-    function sampleValues(spec, overrides = {}) {
-      const parameters = isObject(spec.parameters) ? spec.parameters : {}
-      const values = {}
+    /** The inverse of `piecesOf`. Orphans stay in `parameters` but get no slot. */
+    function applyPieces(tool, pieces) {
+      const parameters = isObject(tool.parameters) ? { ...tool.parameters } : {}
+      const args = []
+      const declared = new Set()
+
+      for (const piece of pieces) {
+        if (piece.kind === 'literal') {
+          args.push({ literal: asString(piece.text) })
+          continue
+        }
+        if (piece.kind === 'stdin') {
+          args.push({ stdin: 'json' })
+          continue
+        }
+        const name = asString(piece.name)
+        if (piece.kind === 'flag') {
+          const binding = { flag: name }
+          const asText = asString(piece.as)
+          if (Array.isArray(piece.originalAs) && piece.originalAs.join(' ') === asText) {
+            binding.as = [...piece.originalAs]
+          } else if (asText.trim() !== '') {
+            binding.as = /\s/u.test(asText.trim()) ? asText.trim().split(/\s+/u) : asText
+          }
+          args.push(binding)
+          parameters[name] = parameterOf(piece, 'boolean')
+          declared.add(name)
+          continue
+        }
+        // variable
+        if (piece.orphan === true) {
+          parameters[name] = parameterOf(piece, asString(piece.type, 'string'))
+          declared.add(name)
+          continue
+        }
+        const binding = { arg: name }
+        if (piece.rawStdin === true) binding.stdin = 'raw'
+        // A field the author wrote as "" is preserved: dropping it would make
+        // "open the card, save" rewrite a definition the user never edited.
+        if (asString(piece.prefix) !== '' || piece.prefixSet === true) binding.prefix = asString(piece.prefix)
+        if (asString(piece.suffix) !== '' || piece.suffixSet === true) binding.suffix = asString(piece.suffix)
+        if (asString(piece.join) !== '' || piece.joinSet === true) binding.join = asString(piece.join)
+        if (piece.repeat === true) binding.repeat = true
+        if (piece.json === true) binding.json = true
+        if (piece.omitIfEmpty === true) binding.omitIfEmpty = true
+        if (piece.allowLeadingDash === true) binding.allowLeadingDash = true
+        if (piece.allowResponseFile === true) binding.allowResponseFile = true
+        args.push(binding)
+        parameters[name] = parameterOf(piece, asString(piece.type, 'string'))
+        declared.add(name)
+      }
+
+      // Drop parameters that no piece mentions any more, unless the piece is an
+      // orphan (which is exactly how the user keeps one on purpose).
+      const kept = {}
       for (const [name, parameter] of Object.entries(parameters)) {
-        values[name] = Object.prototype.hasOwnProperty.call(overrides, name)
-          ? overrides[name]
-          : sampleValue(parameter)
+        if (declared.has(name)) kept[name] = parameter
       }
-      return values
+      return { ...tool, args, parameters: kept }
+    }
+
+    const positionals = (pieces) => pieces.filter((piece) =>
+      (piece.kind === 'variable' && piece.orphan !== true) || piece.kind === 'flag').length
+
+    /** `--glob=<glob>`: the slot keeps its decoration, the value stays unknown. */
+    function slotText(piece) {
+      return `${asString(piece.prefix)}<${asString(piece.name) || '…'}>${asString(piece.suffix)}`
+    }
+
+    /**
+     * The shape of argv, with one box per real element. Values are deliberately
+     * absent: the page cannot know them, and inventing a sample would train the
+     * author to trust a number that never appears at call time.
+     */
+    function previewOf(tool, pieces) {
+      const mode = asString(tool.mode, 'executable')
+      const parameters = isObject(tool.parameters) ? tool.parameters : {}
+      const argv = []
+      // A `{stdin:'json'}` slot (or PowerShell, which always needs one) hands
+      // over EVERY declared parameter as one JSON object, in declaration order —
+      // including parameters that have no argv slot of their own.
+      const toStdin = mode === 'powershell' || pieces.some((piece) => piece.kind === 'stdin')
+      const rawPiece = pieces.find((piece) => piece.kind === 'variable' && piece.rawStdin === true)
+      const stdin = toStdin
+        ? { kind: 'json', names: Object.keys(parameters) }
+        : rawPiece
+          ? { kind: 'raw', names: [asString(rawPiece.name)] }
+          : null
+
+      if (mode === 'executable') {
+        argv.push({ kind: 'prog', text: asString(tool.executable) || '（未填程序）' })
+      } else if (mode === 'script') {
+        argv.push({ kind: 'prog', text: asString(tool.interpreter) || '（未填解释器）' })
+        argv.push({ kind: 'script', text: asString(tool.script) || '（未填脚本路径）' })
+      } else if (mode === 'bash') {
+        argv.push({ kind: 'prog', text: asString(tool.executable) || 'bash' })
+        argv.push({ kind: 'lit', text: '-c' })
+        argv.push({ kind: 'script', text: asString(tool.command) || '（未填命令）' })
+      } else if (mode === 'powershell') {
+        argv.push({ kind: 'prog', text: asString(tool.executable) || 'pwsh' })
+        for (const flag of POWERSHELL_FLAGS) argv.push({ kind: 'lit', text: flag })
+        argv.push({ kind: 'lit', text: '-Command' })
+        argv.push({ kind: 'script', text: asString(tool.command) || '（未填命令）' })
+      }
+
+      // `bash -c <source> <$0> <args…>`: the placeholder is what makes $1 the
+      // first model value instead of $0.
+      if (mode === 'bash' && !toStdin && positionals(pieces) > 0) {
+        argv.push({ kind: 'lit', text: 'custom-tool', notes: '$0' })
+      }
+
+      for (const piece of pieces) {
+        if (piece.kind === 'stdin') continue
+        if (piece.kind === 'literal') {
+          argv.push({ kind: 'lit', text: asString(piece.text) })
+          continue
+        }
+        if (piece.orphan === true) continue
+        if (piece.kind === 'flag') {
+          const as = asString(piece.as)
+          // With a stdin JSON slot a flag is just a boolean key in the object.
+          if (toStdin) continue
+          const active = piece.active === true
+          argv.push({
+            kind: 'flag',
+            name: asString(piece.name),
+            text: as || '（未填 as）',
+            active,
+          })
+          continue
+        }
+        // variable
+        if (piece.rawStdin === true) continue
+        if (toStdin) continue
+        argv.push({ kind: 'variable', name: asString(piece.name), text: slotText(piece) })
+        if (piece.repeat === true) {
+          argv.push({ kind: 'variable', name: '', text: slotText(piece), absent: true, notes: '…逐项' })
+        }
+      }
+
+      return { argv, stdin, toStdin }
     }
 
     // ------------------------------------------------------------ validation
@@ -772,22 +915,16 @@ window.__ModuleLoader__.load({
           const spec = parameters[binding.arg]
           if (!isObject(spec)) at(where, `参数 ${binding.arg} 未在 parameters 中声明`)
           else if (spec.type === 'boolean') {
-            at(where, `boolean 参数应该用 flag 绑定，而不是 arg`)
+            at(where, 'boolean 参数应该用 flag 绑定，而不是 arg')
           }
           if (binding.repeat === true || binding.join !== undefined) {
             if (isObject(spec) && spec.type !== 'array') at(where, 'repeat / join 只能用于 array 参数')
             if (binding.repeat === true && binding.join !== undefined) at(where, 'repeat 与 join 不能同时使用')
           }
-          if (binding.stdin === 'raw' && binding.omitIfEmpty !== true && asString(binding.arg) === '') {
+          if (binding.stdin === 'raw' && asString(binding.arg) === '') {
             at(where, 'stdin: raw 需要 arg')
           }
         })
-
-        if (bindings.some((binding) => isObject(binding) && binding.arg !== undefined
-          && !Object.prototype.hasOwnProperty.call(parameters, binding.arg)
-          && parameters[binding.arg] === undefined)) {
-          // already reported per binding; kept for readability of intent
-        }
 
         const output = isObject(tool.output) ? tool.output : {}
         const parse = asString(output.parse, 'text')
@@ -799,6 +936,16 @@ window.__ModuleLoader__.load({
         if (mode === 'powershell' && bindings.some((binding) => isObject(binding)
           && binding.stdin !== 'json' && (binding.arg !== undefined || binding.flag !== undefined))) {
           at('args', 'powershell 模式只能把参数放进 stdin（JSON）：-Command 之后的标记不进 $args')
+        }
+
+        // A parameter nobody mentions reaches the model and does nothing.
+        const used = new Set(bindings.filter(isObject)
+          .map((binding) => (binding.arg !== undefined ? binding.arg : binding.flag))
+          .filter((value) => typeof value === 'string'))
+        for (const paramName of Object.keys(parameters)) {
+          if (!used.has(paramName)) {
+            at(`parameters.${paramName}`, `参数 ${paramName} 没有放进命令行，模型填了也不会被用到`, 'warning')
+          }
         }
       })
 
@@ -815,7 +962,8 @@ window.__ModuleLoader__.load({
       const style = tone === 'dirty' ? { ...S.chip, ...S.chipDirty }
         : tone === 'bad' ? { ...S.chip, ...S.chipBad }
           : tone === 'ok' ? { ...S.chip, ...S.chipOk }
-            : S.chip
+            : tone === 'mode' ? { ...S.chip, ...S.chipMode }
+              : S.chip
       return h('span', { style }, children)
     }
 
@@ -848,11 +996,12 @@ window.__ModuleLoader__.load({
       })
     }
 
-    function NumberInput({ value, onChange, disabled, placeholder, min, max }) {
+    function NumberInput({ value, onChange, disabled, placeholder, min, max, step }) {
       return h('input', {
         type: 'number',
         min,
         max,
+        step,
         style: S.input,
         value,
         disabled,
@@ -861,123 +1010,124 @@ window.__ModuleLoader__.load({
       })
     }
 
-    function TextArea({ value, onChange, disabled, rows, placeholder, mono = true }) {
+    function TextArea({ value, onChange, disabled, placeholder, rows }) {
       return h('textarea', {
-        style: mono ? { ...S.textarea, minHeight: rows ? rows * 18 : 64 } : { ...S.textarea, font: 'inherit', minHeight: rows ? rows * 18 : 64 },
+        style: S.area,
         value,
         disabled,
         placeholder,
+        rows: rows ?? 3,
         spellCheck: false,
         onChange: (event) => onChange(event.target.value),
       })
     }
 
-    function Select({ value, options, onChange, disabled, render }) {
+    function Select({ value, onChange, options, disabled, labels }) {
       return h('select', {
-        style: S.input,
+        style: S.select,
         value,
         disabled,
         onChange: (event) => onChange(event.target.value),
-      }, options.map((option) => h('option', { key: option, value: option }, render ? render(option) : option)))
+      }, options.map((option) => h('option', { key: option, value: option },
+        labels ? labels[option] ?? option : option)))
     }
 
-    // A dimmed white-on-brand pill reads as an empty grey capsule; a disabled
-    // primary button gets a flat surface and secondary text instead, so "保存"
-    // stays legible while it is unavailable.
     function disabledStyle(kind) {
       if (kind === 'primary') {
-        return {
-          background: C.bg3,
-          border: `1px solid ${C.borderL1}`,
-          color: C.textSecondary,
-          cursor: 'default',
-          opacity: 1,
-        }
+        return { ...S.buttonPrimary, background: C.bg3, color: C.textTertiary, borderColor: C.borderL1, cursor: 'default' }
       }
-      return S.disabled
+      if (kind === 'danger') return { ...S.buttonDanger, ...S.disabled }
+      if (kind === 'small') return { ...S.buttonSmall, ...S.disabled }
+      if (kind === 'icon') return { ...S.iconButton, ...S.disabled }
+      return { ...S.button, ...S.disabled }
     }
 
-    function Button({ children, onClick, disabled, kind, title }) {
+    function Button({ kind, disabled, onClick, children, title }) {
       const base = kind === 'primary' ? S.buttonPrimary
         : kind === 'small' ? S.buttonSmall
           : kind === 'danger' ? S.buttonDanger
-            : S.button
+            : kind === 'icon' ? S.iconButton
+              : S.button
       return h('button', {
         type: 'button',
-        style: disabled ? { ...base, ...disabledStyle(kind) } : base,
-        disabled,
         title,
+        style: disabled ? disabledStyle(kind) : base,
+        disabled,
         onClick,
       }, children)
     }
 
-    function Checkbox({ checked, onChange, disabled, label }) {
-      return h('label', { style: S.checkRow },
+    function Checkbox({ checked, onChange, label, disabled }) {
+      return h('label', { style: disabled ? { ...S.check, ...S.disabled } : S.check },
         h('input', {
           type: 'checkbox',
-          checked: checked === true,
+          checked,
           disabled,
           onChange: (event) => onChange(event.target.checked),
         }),
-        label)
+        label ? h('span', null, label) : null)
     }
 
-    function Switch({ checked, onChange, disabled }) {
-      // A plain checkbox keeps the platform's own focus ring and hit target;
-      // the mock's sliding pill is prettier but needs pixels this page cannot
-      // guarantee across themes.
-      return h('input', {
-        type: 'checkbox',
-        checked: checked === true,
-        disabled,
-        title: checked ? '已启用' : '已停用',
-        style: { cursor: disabled ? 'default' : 'pointer' },
-        onClick: (event) => event.stopPropagation(),
-        onChange: (event) => onChange(event.target.checked),
-      })
+    function Switch({ checked, onChange, disabled, label }) {
+      return h('label', { style: disabled ? { ...S.switchWrap, ...S.disabled } : S.switchWrap },
+        h('span', {
+          style: checked ? { ...S.switchTrack, background: C.brand, borderColor: C.brand } : S.switchTrack,
+        }, h('span', {
+          style: checked
+            ? { ...S.switchKnob, left: 15, background: '#fff' }
+            : S.switchKnob,
+        })),
+        h('input', {
+          type: 'checkbox',
+          checked,
+          disabled,
+          style: { display: 'none' },
+          onChange: (event) => onChange(event.target.checked),
+        }),
+        label ? h('span', { style: S.hint }, label) : null)
     }
 
-    function Segmented({ value, options, onChange, disabled, render }) {
-      return h('span', { style: S.seg }, options.map((option, index) => h('button', {
-        key: option,
+    function Segmented({ value, onChange, options, disabled }) {
+      return h('div', { style: S.seg }, options.map((option) => h('button', {
+        key: option.value,
         type: 'button',
-        style: {
-          ...S.segButton,
-          ...(value === option ? S.segButtonOn : null),
-          ...(index === options.length - 1 ? { borderRight: 'none' } : null),
-          ...(disabled ? S.disabled : null),
-        },
         disabled,
-        onClick: () => onChange(option),
-      }, render ? render(option) : option)))
+        style: option.value === value ? { ...S.segItem, ...S.segItemOn } : S.segItem,
+        onClick: () => onChange(option.value),
+      }, option.label)))
     }
 
-    /**
-     * A JSON textarea that keeps invalid text on screen and reports why.
-     *
-     * The text is adopted from `value` only when that value's serialized form
-     * changes (reload, template swap), so typing in a sibling field never
-     * fights the editor.
-     */
-    function JsonField({ label, value, onChange, disabled, rows, hint }) {
-      const format = (input) => JSON.stringify(input ?? null, null, 2)
+    /** JSON in a textarea: keeps raw text while it is invalid, adopts on change. */
+    function JsonField({ value, onChange, disabled, placeholder, rows }) {
       const serialized = (input) => JSON.stringify(input ?? null)
-      const [text, setText] = React.useState(() => format(value))
-      const [problem, setProblem] = React.useState('')
+      const text = (input) => {
+        if (input === undefined || input === null) return ''
+        if (Array.isArray(input) && input.length === 0) return ''
+        if (isObject(input) && Object.keys(input).length === 0) return ''
+        try {
+          return JSON.stringify(input, null, 2)
+        } catch {
+          return String(input)
+        }
+      }
       const adopted = React.useRef(serialized(value))
+      const [draft, setDraft] = React.useState(text(value))
+      const [problem, setProblem] = React.useState('')
       const incoming = serialized(value)
+      // Compare the *content*, not the object identity: the parent rebuilds the
+      // object on every render, and adopting on identity would reformat the
+      // textarea under the cursor on each keystroke.
       if (incoming !== adopted.current) {
         adopted.current = incoming
-        setText(format(value))
+        setDraft(text(value))
         setProblem('')
       }
-
       const commit = (next) => {
-        setText(next)
+        setDraft(next)
         if (next.trim() === '') {
+          adopted.current = serialized(undefined)
           setProblem('')
-          adopted.current = serialized(null)
-          onChange(null)
+          onChange(undefined)
           return
         }
         try {
@@ -989,623 +1139,745 @@ window.__ModuleLoader__.load({
           setProblem(error instanceof Error ? error.message : String(error))
         }
       }
-
       return h('div', { style: S.field },
-        h('span', { style: S.label }, label),
-        h(TextArea, { value: text, onChange: commit, disabled, rows, placeholder: '{}' }),
-        problem
-          ? h('span', { style: S.error }, `JSON 有误：${problem}`)
-          : hint ? h('span', { style: S.hint }, hint) : null)
+        h('textarea', {
+          style: S.area,
+          value: draft,
+          disabled,
+          placeholder,
+          rows: rows ?? 3,
+          spellCheck: false,
+          onChange: (event) => commit(event.target.value),
+        }),
+        problem ? h('span', { style: S.error }, `JSON 无效：${problem}`) : null)
     }
 
-    function Panel({ title, meta, action, children, last }) {
+    function Panel({ title, meta, children, last }) {
       return h('div', { style: last ? S.panelLast : S.panel },
         h('div', { style: S.panelHead },
           h('span', { style: S.panelTitle }, title),
           meta ? h('span', { style: S.panelMeta }, meta) : null,
-          h('span', { style: S.grow }),
-          action || null),
-        children)
+          h('span', { style: S.grow })),
+        h('div', { style: S.panelBody }, children))
     }
 
-    // ------------------------------------------------------------- argv strip
+    const code = (text) => h('code', { style: S.code }, text)
 
-    function ArgvStrip({ spec, samples, issues }) {
-      const values = sampleValues(spec, samples)
-      const preview = previewInvocation(spec, values)
-      const mode = asString(spec.mode, 'executable')
-
-      if (!preview.ok) {
-        return h('div', { style: S.argv },
-          h('span', { style: { ...S.token, ...S.tokenStdin } }, preview.errors.join('；')))
-      }
-
-      const chips = preview.argv.map((element, index) => h('span', {
-        key: `argv-${index}`,
-        style: index === 0 ? { ...S.token, ...S.tokenExe } : S.token,
-        title: `argv[${index}]`,
-      }, element))
-
-      const stdin = preview.stdin
-        ? [h('span', { key: 'arrow', style: S.tokenArrow }, '│ stdin →'),
-          h('span', {
-            key: 'stdin',
-            style: { ...S.token, ...S.tokenStdin },
-            title: `stdin (${preview.stdin.kind})`,
-          }, preview.stdin.kind === 'json'
-            ? (preview.stdin.text.length > 160 ? `${preview.stdin.text.slice(0, 160)}…` : preview.stdin.text)
-            : (preview.stdin.text.length > 160 ? `${preview.stdin.text.slice(0, 160)}…` : preview.stdin.text))]
-        : []
-
-      const target = mode === 'script' && !asString(spec.interpreter)
-        ? h('span', { style: { ...S.token, ...S.tokenStdin } }, '未填解释器')
-        : null
-
-      return h('div', { style: S.argv },
-        target,
-        chips.length > 0 ? chips : h('span', { style: S.hint }, '这个工具没有任何 argv 元素，只靠宿主注入。'),
-        stdin)
-    }
-
-    // ------------------------------------------------------- parameters table
-
-    function ParametersPanel({ tool, disabled, onChange }) {
-      const parameters = isObject(tool.parameters) ? tool.parameters : {}
-      const names = Object.keys(parameters)
-
-      const setParameter = (name, patch) => {
-        const next = { ...parameters }
-        const merged = { ...(isObject(parameters[name]) ? parameters[name] : {}), ...patch }
-        for (const key of Object.keys(merged)) {
-          if (merged[key] === undefined) delete merged[key]
-        }
-        next[name] = merged
-        onChange({ parameters: next })
-      }
-
-      const removeParameter = (name) => {
-        const next = { ...parameters }
-        delete next[name]
-        // Drop bindings that only existed to feed the removed parameter, so the
-        // definition does not silently keep a dangling reference.
-        const bindings = (Array.isArray(tool.args) ? tool.args : []).filter((binding) => isObject(binding)
-          && binding.arg !== name && binding.flag !== name)
-        onChange({ parameters: next, args: bindings })
-      }
-
-      const renameParameter = (from, to) => {
-        if (to === '' || to === from) return
-        if (!PARAM_PATTERN.test(to)) return
-        if (Object.prototype.hasOwnProperty.call(parameters, to)) return
-        const next = {}
-        for (const [key, value] of Object.entries(parameters)) next[key === from ? to : key] = value
-        const bindings = (Array.isArray(tool.args) ? tool.args : []).map((binding) => {
-          if (!isObject(binding)) return binding
-          if (binding.arg === from) return { ...binding, arg: to }
-          if (binding.flag === from) return { ...binding, flag: to }
-          return binding
-        })
-        onChange({ parameters: next, args: bindings })
-      }
-
-      const addParameter = () => {
-        let index = 1
-        let name = 'param1'
-        while (Object.prototype.hasOwnProperty.call(parameters, name)) {
-          index += 1
-          name = `param${index}`
-        }
-        onChange({ parameters: { ...parameters, [name]: { type: 'string', required: true } } })
-      }
-
-      const rows = names.map((name) => {
-        const parameter = isObject(parameters[name]) ? parameters[name] : {}
-        const type = asString(parameter.type, 'string')
-        return h('tr', { key: `param-${name}` },
-          h('td', { style: S.td },
-            h(TextInput, {
-              value: name,
-              disabled,
-              mono: true,
-              onChange: (next) => renameParameter(name, next.trim()),
-            })),
-          h('td', { style: S.td },
-            h(Select, {
-              value: type,
-              options: PARAM_TYPES,
-              disabled,
-              onChange: (next) => setParameter(name, { type: next }),
-            })),
-          h('td', { style: { ...S.td, textAlign: 'center' } },
-            h('input', {
-              type: 'checkbox',
-              checked: parameter.required === true,
-              disabled,
-              onChange: (event) => setParameter(name, { required: event.target.checked }),
-            })),
-          h('td', { style: S.td },
-            h(TextInput, {
-              value: asString(parameter.description),
-              disabled,
-              placeholder: '给模型看的说明',
-              onChange: (next) => setParameter(name, { description: next }),
-            })),
-          h('td', { style: { ...S.td, textAlign: 'right' } },
-            h(Button, { kind: 'danger', disabled, onClick: () => removeParameter(name) }, '×')))
-      })
-
-      return h(Panel, {
-        title: '参数',
-        meta: names.length > 0 ? `${names.length} 个` : '尚未声明',
-        action: h(Button, { kind: 'small', disabled, onClick: addParameter }, '＋ 参数'),
+    function OptionRow({ title, detail, checked, onChange, disabled }) {
+      return h('label', {
+        style: { ...S.option, ...(checked ? S.optionOn : S.optionOff) },
       },
-      names.length === 0
-        ? h('span', { style: S.hint }, '模型能填的字段都在这里声明；不声明参数的工具有固定行为。')
-        : h('table', { style: S.table },
-          h('thead', null, h('tr', null,
-            h('th', { style: S.th }, '名称'),
-            h('th', { style: S.th }, '类型'),
-            h('th', { style: { ...S.th, textAlign: 'center' } }, '必填'),
-            h('th', { style: S.th }, '说明'),
-            h('th', { style: S.th }, ''))),
-          h('tbody', null, rows)))
-    }
-
-    // ------------------------------------------------------- bindings editor
-
-    function bindingKind(binding) {
-      if (!isObject(binding)) return 'literal'
-      if (binding.stdin === 'json') return 'stdin-json'
-      if (binding.flag !== undefined) return 'flag'
-      if (binding.arg !== undefined) return binding.stdin === 'raw' ? 'stdin-raw' : 'arg'
-      return 'literal'
-    }
-
-    /** Rewrite one binding as the chosen kind, dropping fields that no longer apply. */
-    function rebind(binding, kind, parameters) {
-      const firstParam = Object.keys(parameters)[0] ?? ''
-      const booleanParam = Object.entries(parameters)
-        .find(([, spec]) => isObject(spec) && spec.type === 'boolean')?.[0] ?? firstParam
-      if (kind === 'literal') return { literal: asString(binding?.literal, '') }
-      if (kind === 'stdin-json') return { stdin: 'json' }
-      if (kind === 'stdin-raw') return { arg: asString(binding?.arg, firstParam), stdin: 'raw' }
-      if (kind === 'flag') {
-        return {
-          flag: asString(binding?.flag, booleanParam),
-          as: binding?.as ?? `--${asString(binding?.flag, booleanParam)}`.replace(/_/g, '-'),
-        }
-      }
-      return { arg: asString(binding?.arg, firstParam) }
-    }
-
-    function BindingsPanel({ tool, disabled, onChange }) {
-      const parameters = isObject(tool.parameters) ? tool.parameters : {}
-      const paramNames = Object.keys(parameters)
-      const bindings = Array.isArray(tool.args) ? tool.args : []
-      const mode = asString(tool.mode, 'executable')
-
-      const replace = (index, next) => {
-        const list = bindings.map((binding, i) => (i === index ? next : binding))
-        onChange({ args: list })
-      }
-      const remove = (index) => onChange({ args: bindings.filter((_, i) => i !== index) })
-      const move = (index, delta) => {
-        const target = index + delta
-        if (target < 0 || target >= bindings.length) return
-        const list = [...bindings]
-        const [item] = list.splice(index, 1)
-        list.splice(target, 0, item)
-        onChange({ args: list })
-      }
-      const add = (kind) => onChange({
-        args: [...bindings, rebind({}, kind, parameters)],
-      })
-
-      const rows = bindings.map((binding, index) => {
-        const kind = bindingKind(binding)
-        const patch = (next) => {
-          const merged = { ...binding, ...next }
-          for (const key of Object.keys(merged)) {
-            if (merged[key] === undefined) delete merged[key]
-          }
-          replace(index, merged)
-        }
-        const setField = (key) => (value) => patch({ [key]: value === '' ? undefined : value })
-
-        let primary
-        if (kind === 'literal') {
-          primary = h(TextInput, {
-            value: asString(binding.literal),
-            disabled,
-            mono: true,
-            placeholder: '--short',
-            onChange: setField('literal'),
-          })
-        } else if (kind === 'flag') {
-          primary = h('div', { style: S.grid2 },
-            h(Select, {
-              value: asString(binding.flag),
-              options: paramNames.length > 0 ? paramNames : [''],
-              disabled,
-              onChange: setField('flag'),
-            }),
-            h(TextInput, {
-              value: Array.isArray(binding.as) ? binding.as.join(' ') : asString(binding.as),
-              disabled,
-              mono: true,
-              placeholder: '--dry-run',
-              onChange: (next) => {
-                const parts = next.split(/\s+/u).filter(Boolean)
-                patch({ as: parts.length > 1 ? parts : (parts[0] ?? undefined) })
-              },
-            }))
-        } else if (kind === 'stdin-json') {
-          primary = h('span', { style: S.hint }, '把整份参数 JSON 写进 stdin（powershell 唯一可用形式）')
-        } else {
-          primary = h(Select, {
-            value: asString(binding.arg),
-            options: paramNames.length > 0 ? paramNames : [''],
-            disabled,
-            onChange: setField('arg'),
-          })
-        }
-
-        const advanced = kind === 'arg' || kind === 'stdin-raw'
-          ? h('div', { style: S.bindingAdvanced },
-            h(Field, { label: '前缀' },
-              h(TextInput, { value: asString(binding.prefix), disabled, mono: true, placeholder: '--glob=', onChange: setField('prefix') })),
-            h(Field, { label: '后缀' },
-              h(TextInput, { value: asString(binding.suffix), disabled, mono: true, placeholder: '', onChange: setField('suffix') })),
-            kind === 'arg'
-              ? h(Field, { label: 'join（数组用）' },
-                h(TextInput, { value: asString(binding.join), disabled, mono: true, placeholder: ',', onChange: setField('join') }))
-              : null,
-            h('div', { style: { display: 'grid', gap: 3, alignContent: 'start', paddingTop: 14 } },
-              h(Checkbox, {
-                checked: binding.omitIfEmpty === true,
-                disabled,
-                label: '空值时不传',
-                onChange: (next) => patch({ omitIfEmpty: next ? true : undefined }),
-              }),
-              h(Checkbox, {
-                checked: binding.repeat === true,
-                disabled,
-                label: 'repeat（数组逐项）',
-                onChange: (next) => patch({ repeat: next ? true : undefined }),
-              }),
-              h(Checkbox, {
-                checked: binding.json === true,
-                disabled,
-                label: 'json（值序列化）',
-                onChange: (next) => patch({ json: next ? true : undefined }),
-              }),
-              h(Checkbox, {
-                checked: binding.allowLeadingDash === true,
-                disabled,
-                label: '允许值以 - 开头',
-                onChange: (next) => patch({ allowLeadingDash: next ? true : undefined }),
-              }),
-              h(Checkbox, {
-                checked: binding.allowResponseFile === true,
-                disabled,
-                label: '允许值以 @ 开头',
-                onChange: (next) => patch({ allowResponseFile: next ? true : undefined }),
-              })))
-          : null
-
-        return h('div', { key: `binding-${index}`, style: S.bindingRow },
-          h('div', { style: S.bindingMain },
-            h(Select, {
-              value: kind,
-              options: BINDING_KINDS,
-              disabled,
-              render: (option) => BINDING_LABEL[option] ?? option,
-              onChange: (next) => replace(index, rebind(binding, next, parameters)),
-            }),
-            primary,
-            h('span', null,
-              h(Button, { kind: 'small', disabled: disabled || index === 0, onClick: () => move(index, -1), title: '上移' }, '↑'),
-              ' ',
-              h(Button, { kind: 'small', disabled: disabled || index === bindings.length - 1, onClick: () => move(index, 1), title: '下移' }, '↓'),
-              ' ',
-              h(Button, { kind: 'danger', disabled, onClick: () => remove(index), title: '删除' }, '×'))),
-          advanced)
-      })
-
-      const addButtons = ['literal', 'arg', 'flag', 'stdin-json'].filter((kind) => {
-        if (kind === 'stdin-json') return mode !== 'executable'
-        return true
-      }).map((kind) => h(Button, {
-        key: kind,
-        kind: 'small',
+      h('input', {
+        type: 'checkbox',
+        checked,
         disabled,
-        onClick: () => add(kind),
-      }, `＋ ${BINDING_LABEL[kind]}`))
-
-      return h(Panel, {
-        title: '参数怎么变成 argv',
-        meta: `${bindings.length} 条绑定`,
-        action: h('span', { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } }, addButtons),
-      },
-      bindings.length === 0
-        ? h('span', { style: S.hint }, mode === 'executable'
-          ? '没有绑定：这个工具不带任何参数运行。'
-          : mode === 'powershell'
-            ? 'PowerShell 只接受 stdin（JSON）；不声明绑定就拿不到参数。'
-            : '没有绑定：脚本拿不到参数。')
-        : h('div', null, rows),
-      h('div', { style: { marginTop: 8 } }, h(ArgvStrip, { spec: tool, samples: {} , issues: [] })))
+        onChange: (event) => onChange(event.target.checked),
+      }),
+      h('span', null,
+        h('span', { style: S.optionTitle }, title),
+        detail ? h('span', { style: S.optionDetail, title: '' }, h('br'), detail) : null))
     }
 
-    // ----------------------------------------------------------- tool card
+    // ---------------------------------------------------------------- pieces
 
-    function ToolCard({ tool, index, total, disabled, savedAt, issues, onChange, onRemove, onMove, onDuplicate, samples, onSample }) {
-      const customCwd = typeof tool.cwd === 'string' && tool.cwd !== '' && tool.cwd !== '.'
-      const [open, setOpen] = React.useState(index === 0)
-      const set = (patch) => {
-        const next = { ...tool, ...patch }
-        for (const key of Object.keys(next)) {
-          if (next[key] === undefined) delete next[key]
-        }
-        onChange(next)
+    function PieceRow({ piece, index, total, disabled, mode, onChange, onRemove, onMove }) {
+      const [open, setOpen] = React.useState(false)
+      const patch = (fields) => onChange({ ...piece, ...fields })
+      const isVariable = piece.kind === 'variable' && piece.orphan !== true
+      const isFlag = piece.kind === 'flag'
+      const isArray = asString(piece.type) === 'array'
+
+      const head = [
+        h(Select, {
+          key: 'kind',
+          value: piece.kind,
+          disabled,
+          options: PIECE_KINDS,
+          labels: PIECE_LABEL,
+          onChange: (next) => {
+            if (next === 'literal') onChange({ id: piece.id, kind: 'literal', text: '' })
+            else if (next === 'stdin') onChange({ id: piece.id, kind: 'stdin' })
+            else if (next === 'flag') {
+              onChange({ id: piece.id, kind: 'flag', name: asString(piece.name), as: '', description: '' })
+            } else {
+              onChange({
+                id: piece.id,
+                kind: 'variable',
+                name: asString(piece.name),
+                rawStdin: false,
+                prefix: '',
+                suffix: '',
+                join: '',
+                repeat: false,
+                json: false,
+                omitIfEmpty: false,
+                allowLeadingDash: false,
+                allowResponseFile: false,
+                type: 'string',
+                items: '',
+                required: false,
+                default: '',
+                description: '',
+              })
+            }
+          },
+        }),
+      ]
+
+      if (piece.kind === 'literal') {
+        head.push(h('div', { key: 'text', style: S.pieceGrow },
+          h(TextInput, {
+            mono: true,
+            value: asString(piece.text),
+            disabled,
+            placeholder: '原样放进 argv 的一个元素，例如 --short',
+            onChange: (next) => patch({ text: next }),
+          })))
+      } else if (piece.kind === 'stdin') {
+        head.push(h('div', { key: 'fixed', style: { ...S.pieceGrow, ...S.hint } },
+          '全部参数打包成一份 JSON 写到 stdin；键名就是各个变量名。'))
+      } else if (piece.kind === 'flag') {
+        head.push(h('div', { key: 'name', style: S.pieceGrow },
+          h(TextInput, {
+            mono: true,
+            value: asString(piece.name),
+            disabled,
+            placeholder: '开关对应的参数名，例如 sort_keys',
+            onChange: (next) => patch({ name: next }),
+          })))
+      } else {
+        head.push(h('div', { key: 'name', style: S.pieceGrow },
+          h(TextInput, {
+            mono: true,
+            value: asString(piece.name),
+            disabled,
+            placeholder: '变量名，模型看到的参数名',
+            onChange: (next) => patch({ name: next }),
+          })))
       }
-      const mode = asString(tool.mode, 'executable')
-      const own = issuesFor(issues, index)
-      const bad = own.some((issue) => issue.severity === 'error')
 
-      // The headline shows the *persisted* name: a draft name only reaches the
-      // card header after a successful save, so typing never rewrites it.
+      head.push(h('button', {
+        key: 'twist',
+        type: 'button',
+        title: open ? '收起' : '展开',
+        disabled,
+        style: S.iconButton,
+        onClick: () => setOpen((value) => !value),
+      }, open ? '▾' : '▸'))
+      head.push(h('button', {
+        key: 'up',
+        type: 'button',
+        title: '上移',
+        disabled: disabled || index === 0,
+        style: index === 0 ? { ...S.iconButton, ...S.disabled } : S.iconButton,
+        onClick: () => onMove(index, -1),
+      }, '↑'))
+      head.push(h('button', {
+        key: 'down',
+        type: 'button',
+        title: '下移',
+        disabled: disabled || index === total - 1,
+        style: index === total - 1 ? { ...S.iconButton, ...S.disabled } : S.iconButton,
+        onClick: () => onMove(index, 1),
+      }, '↓'))
+      head.push(h('button', {
+        key: 'drop',
+        type: 'button',
+        title: '删除这一格',
+        disabled,
+        style: S.buttonDanger,
+        onClick: () => onRemove(index),
+      }, '×'))
+
+      const body = []
+      if (open) {
+        if (piece.kind === 'literal') {
+          body.push(h('div', { key: 'note', style: S.note },
+            '字面值不来自模型：它是定义的一部分，模型改不了。'))
+        }
+        if (isVariable || isFlag) {
+          const fields = [
+            h(Field, { key: 'type', label: isFlag ? '类型（固定为 boolean）' : '类型' },
+              isFlag
+                ? h('div', { style: S.hint }, 'boolean')
+                : h(Select, {
+                  value: asString(piece.type, 'string'),
+                  disabled,
+                  options: PARAM_TYPES,
+                  onChange: (next) => patch({ type: next }),
+                })),
+            h(Field, { key: 'required', label: '必填' },
+              h(Checkbox, {
+                checked: piece.required === true,
+                disabled,
+                label: '模型必须填',
+                onChange: (next) => patch({ required: next }),
+              })),
+            h(Field, { key: 'default', label: '默认值（JSON 文本）' },
+              h(TextInput, {
+                mono: true,
+                disabled,
+                value: asString(piece.default),
+                placeholder: isFlag ? 'false' : '留空表示没有默认值',
+                onChange: (next) => patch({ default: next }),
+              })),
+          ]
+          body.push(h('div', { key: 'fields', style: S.grid3 }, fields))
+          if (isVariable && isArray) {
+            body.push(h('div', { key: 'items', style: S.grid3 },
+              h(Field, { label: '数组元素类型' },
+                h(Select, {
+                  value: asString(piece.items, 'string'),
+                  disabled,
+                  options: PARAM_ITEMS,
+                  onChange: (next) => patch({ items: next }),
+                }))))
+          }
+          body.push(h(Field, { key: 'desc', label: '说明（模型读这一行）' },
+            h(TextInput, {
+              value: asString(piece.description),
+              disabled,
+              placeholder: '这个参数是什么意思，接受什么样的值',
+              onChange: (next) => patch({ description: next }),
+            })))
+          if (isFlag) {
+            body.push(h(Field, {
+              key: 'as',
+              label: '为真时插入',
+              hint: '多个 argv 元素用空格分隔；模型给 false 或不给时整格不出现。',
+            }, h(TextInput, {
+              mono: true,
+              value: asString(piece.as),
+              disabled,
+              placeholder: '例如 --sort 或 --verbose',
+              onChange: (next) => patch({ as: next }),
+            })))
+          } else {
+            const rows = []
+            if (piece.rawStdin !== true) {
+              rows.push(h(Field, {
+                key: 'prefix',
+                label: '前缀（贴在这一格前面）',
+                hint: '和值同属一个 argv 元素，例如 --glob=',
+              }, h(TextInput, {
+                mono: true,
+                value: asString(piece.prefix),
+                disabled,
+                onChange: (next) => patch({ prefix: next }),
+              })))
+              rows.push(h(Field, {
+                key: 'suffix',
+                label: '后缀（贴在这一格后面）',
+                hint: '同上，例如 .json',
+              }, h(TextInput, {
+                mono: true,
+                value: asString(piece.suffix),
+                disabled,
+                onChange: (next) => patch({ suffix: next }),
+              })))
+              if (asString(piece.join) !== '' && isArray) {
+                rows.push(h(Field, {
+                  key: 'join',
+                  label: '合并分隔符',
+                  hint: '把数组连成一个 argv 元素',
+                }, h(TextInput, {
+                  mono: true,
+                  value: asString(piece.join),
+                  disabled,
+                  onChange: (next) => patch({ join: next }),
+                })))
+              }
+            }
+            if (rows.length > 0) body.push(h('div', { key: 'prefixes', style: S.grid3 }, rows))
+
+            const options = []
+            if (isArray) {
+              options.push(h(OptionRow, {
+                key: 'join',
+                title: '所有值挤成一格',
+                detail: h('span', null, '传 ', code('[a,b]'), ' 得到一格 ', code('a,b'), '（分隔符在下面填）'),
+                checked: asString(piece.join) !== '',
+                disabled,
+                onChange: (next) => patch({ join: next ? (asString(piece.join) || ',') : '' }),
+              }))
+              options.push(h(OptionRow, {
+                key: 'repeat',
+                title: '一个值占一格，有几个值就占几格',
+                detail: h('span', null, '传 ', code('[a,b]'), ' 得到两格：', code('a'), ' ', code('b')),
+                checked: piece.repeat === true,
+                disabled,
+                onChange: (next) => patch({ repeat: next }),
+              }))
+            }
+            options.push(h(OptionRow, {
+              key: 'json',
+              title: '原样输出成 JSON 文本',
+              detail: h('span', null, code('[1,2]'), ' 变成一格 ', code('[1,2]'), '，不会拆成 1 和 2'),
+              checked: piece.json === true,
+              disabled,
+              onChange: (next) => patch({ json: next }),
+            }))
+            options.push(h(OptionRow, {
+              key: 'omit',
+              title: '没给值就整格不要',
+              detail: '模型不传这个参数时不出现空串，而不是留一格空的',
+              checked: piece.omitIfEmpty === true,
+              disabled,
+              onChange: (next) => patch({ omitIfEmpty: next }),
+            }))
+            options.push(h(OptionRow, {
+              key: 'dash',
+              title: '允许值以横杠开头',
+              detail: h('span', null, '默认拦掉 ', code('--help'), ' 这类值，避免被当成程序的选项'),
+              checked: piece.allowLeadingDash === true,
+              disabled,
+              onChange: (next) => patch({ allowLeadingDash: next }),
+            }))
+            options.push(h(OptionRow, {
+              key: 'at',
+              title: '允许值以 @ 开头',
+              detail: h('span', null, '默认拦掉 ', code('@file'), '，避免程序把它当成参数文件'),
+              checked: piece.allowResponseFile === true,
+              disabled,
+              onChange: (next) => patch({ allowResponseFile: next }),
+            }))
+            body.push(h('div', { key: 'opts', style: S.options },
+              h('div', { style: S.optionsTitle }, '这个参数在命令行里长什么样'),
+              ...options))
+          }
+        }
+        if (piece.kind === 'stdin') {
+          body.push(h('div', { key: 'note', style: S.note },
+            'PowerShell 模式会自动这样做，不用再加一条。'
+            + '脚本用 $payload = [Console]::In.ReadToEnd() | ConvertFrom-Json 取值。'))
+        }
+      }
+
+      return h('div', { key: piece.id, style: S.piece },
+        h('div', { style: S.pieceHead }, ...head),
+        body.length > 0 ? h('div', { style: S.pieceBody }, ...body) : null)
+    }
+
+    function PreviewStrip({ preview, mode }) {
+      const chips = preview.argv.map((item, index) => {
+        const ghost = item.absent === true || (item.kind === 'flag' && item.active !== true)
+        const color = TONE[item.kind] ?? TONE.lit
+        return h('span', {
+          key: `${index}:${item.kind}:${item.text}`,
+          title: item.notes ?? '',
+          style: {
+            ...S.chipBox,
+            ...(ghost ? S.chipGhost : null),
+            color,
+            borderColor: ghost ? C.borderL2 : 'transparent',
+          },
+        },
+        item.name ? h('b', { style: { fontWeight: 600, fontSize: 10.5 } }, item.name) : null,
+        h('span', null, item.text))
+      })
+
+      const legend = [
+        ['prog', '程序'],
+        ['script', '脚本 / 命令文本'],
+        ['lit', '字面值'],
+        ['variable', '变量'],
+        ['flag', '开关'],
+        ['stdin', 'stdin'],
+      ].map(([kind, label]) => h('span', { key: kind, style: S.legendItem },
+        h('span', { style: { ...S.legendDot, background: TONE[kind] } }),
+        label))
+
+      const stdinRow = preview.stdin === null
+        ? null
+        : preview.stdin.kind === 'raw'
+          ? h('div', { key: 'stdin', style: { display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' } },
+            h('span', { style: { ...S.hint, color: TONE.stdin } }, 'stdin →'),
+            ...preview.stdin.names.map((name) => h('span', {
+              key: name,
+              style: { ...S.chipBox, color: TONE.stdin, borderColor: C.borderL1 },
+            }, h('b', { style: { fontWeight: 600, fontSize: 10.5 } }, '原样'), h('span', null, name))),
+            h('span', { style: { ...S.chipBox, ...S.chipEmpty } }, '这个值原样写进 stdin，不拆不改'))
+          : h('div', { key: 'stdin', style: { display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' } },
+            h('span', { style: { ...S.hint, color: TONE.stdin } }, 'stdin →'),
+            ...preview.stdin.names.map((name) => h('span', {
+              key: name,
+              style: { ...S.chipBox, color: TONE.stdin, borderColor: C.borderL1 },
+            }, h('b', { style: { fontWeight: 600, fontSize: 10.5 } }, 'JSON 键'), h('span', null, name))),
+            h('span', { style: { ...S.chipBox, ...S.chipEmpty } }, '一份 JSON 对象，键名就是上面这些'))
+
+      return h('div', { style: S.panelBody },
+        h('div', { style: S.legend }, ...legend,
+          h('span', { key: 'ghost', style: S.legendItem }, '虚线框 = 可能没有')),
+        h('div', { style: S.preview },
+          chips.length > 0 ? chips : h('span', { style: S.previewEmpty }, '还没有任何 argv 元素')),
+        stdinRow,
+        h('div', { style: S.hint },
+          `${preview.argv.filter((item) => item.absent !== true).length} 个 argv 元素`
+          + '；每个框就是程序实际收到的一个元素，值由模型填，所以这里只显示形状。'))
+    }
+
+    // ------------------------------------------------------------- tool card
+
+    function ToolCard({
+      tool,
+      index,
+      total,
+      disabled,
+      savedAt,
+      issues,
+      onChange,
+      onRemove,
+      onMove,
+      onDuplicate,
+    }) {
+      const [open, setOpen] = React.useState(index === 0)
+      const [flagPreview, setFlagPreview] = React.useState({})
+      const mine = issuesFor(issues, index)
+      const errors = mine.filter((issue) => issue.severity !== 'warning')
+      const warnings = mine.filter((issue) => issue.severity === 'warning')
+
+      // The headline only follows the persisted name, so typing a new name does
+      // not rename the card (and remount its inputs) on every keystroke.
       const committed = React.useRef(asString(tool.name))
       React.useEffect(() => { committed.current = asString(tool.name) }, [savedAt])
-      const draftName = asString(tool.name)
 
-      const target = mode === 'executable'
-        ? h(Field, { label: '可执行文件', hint: 'PATH 中的名字（如 git）或绝对路径；preflight 会解析成绝对路径' },
-          h(TextInput, {
-            value: asString(tool.executable),
-            disabled,
-            mono: true,
-            placeholder: 'git',
-            onChange: (next) => set({ executable: next }),
-          }))
-        : mode === 'script'
-          ? h('div', { style: S.grid2 },
-            h(Field, {
-              label: '解释器',
-              hint: '写绝对路径就用那一份（venv 选 venv 里的）；只写名字则按 PATH 找',
-            },
-            h(TextInput, {
-              value: asString(tool.interpreter),
-              disabled,
-              mono: true,
-              placeholder: 'C:/venvs/myproj/Scripts/python.exe',
-              onChange: (next) => set({ interpreter: next }),
-            })),
-            h(Field, { label: '脚本路径' },
-              h(TextInput, {
-                value: asString(tool.script),
-                disabled,
-                mono: true,
-                placeholder: 'C:/Users/me/tools/report.py',
-                onChange: (next) => set({ script: next }),
-              })))
-          : h(Field, {
-            label: mode === 'bash' ? 'bash 脚本文本（模型参数只进 $@）' : 'PowerShell 脚本文本（参数只能走 stdin）',
-            hint: '脚本文本由作者固定；模型的值永远不会拼进这段文本',
-          }, h(TextArea, {
-            value: asString(tool.command),
-            disabled,
-            rows: 5,
-            onChange: (next) => set({ command: next }),
-          }))
+      const set = (fields) => onChange({ ...tool, ...fields })
+      const mode = asString(tool.mode, 'executable')
+      const pieces = piecesOf(tool).map((piece) => (
+        piece.kind === 'flag' ? { ...piece, active: flagPreview[piece.id] === true } : piece
+      ))
+      const preview = previewOf(tool, pieces)
+      const orphanCount = pieces.filter((piece) => piece.orphan === true).length
 
-      const samplesForTool = samples?.[index] ?? {}
+      const setPieces = (next) => onChange(applyPieces(tool, next))
+      const updatePiece = (at, next) => setPieces(pieces.map((piece, i) => (i === at ? next : piece)))
+      const removePiece = (at) => setPieces(pieces.filter((_, i) => i !== at))
+      const movePiece = (at, delta) => {
+        const target = at + delta
+        if (target < 0 || target >= pieces.length) return
+        const next = [...pieces]
+        const [item] = next.splice(at, 1)
+        next.splice(target, 0, item)
+        setPieces(next)
+      }
+      const addPiece = (kind) => {
+        const base = { id: `n${pieces.length}:${kind}`, kind }
+        if (kind === 'literal') setPieces([...pieces, { ...base, text: '' }])
+        else if (kind === 'stdin') setPieces([...pieces, { ...base }])
+        else if (kind === 'flag') {
+          setPieces([...pieces, {
+            ...base, name: 'flag_name', as: '--flag', description: '', required: false,
+          }])
+        } else {
+          setPieces([...pieces, {
+            ...base, name: `param${pieces.length + 1}`, type: 'string', items: '',
+            required: false, default: '', description: '',
+            rawStdin: false, prefix: '', suffix: '', join: '',
+            repeat: false, json: false, omitIfEmpty: false,
+            allowLeadingDash: false, allowResponseFile: false,
+          }])
+        }
+      }
 
-      return h('section', { style: open ? { ...S.card, ...S.cardOpen } : S.card },
-        h('div', {
-          style: S.cardHead,
-          onClick: () => setOpen(!open),
-        },
-        h('span', { style: { ...S.twist, transform: open ? 'rotate(90deg)' : 'none' } }, '▶'),
-        h('span', { style: { ...S.cardName, color: bad ? C.error : C.textPrimary } }, committed.current || '（未命名）'),
-        committed.current === '' ? null : h(Chip, null, MODE_LABEL[mode] ?? mode),
-        draftName !== committed.current ? h(Chip, { tone: 'dirty' }, '未保存') : null,
-        bad ? h(Chip, { tone: 'bad' }, `${own.filter((issue) => issue.severity === 'error').length} 处错误`) : null,
-        tool.enabled === false ? h(Chip, { tone: 'dirty' }, '已停用') : null,
-        h('span', { style: S.grow }),
-        h(Switch, {
-          checked: tool.enabled !== false,
+      const modeRows = []
+      if (mode === 'executable') {
+        modeRows.push(h(Field, {
+          key: 'exe',
+          label: '可执行文件',
+          hint: '写名字就按 PATH 找；写绝对路径就用那一份。',
+        }, h(TextInput, {
+          mono: true,
           disabled,
-          onChange: (next) => set({ enabled: next }),
-        })),
+          value: asString(tool.executable),
+          placeholder: 'C:/Software/Git/cmd/git.exe 或 git',
+          onChange: (next) => set({ executable: next }),
+        })))
+      }
+      if (mode === 'script') {
+        modeRows.push(h(Field, {
+          key: 'interp',
+          label: '解释器',
+          hint: '写绝对路径就用那一份（venv 选 venv 里的）；只写名字则按 PATH 找。',
+        }, h(TextInput, {
+          mono: true,
+          disabled,
+          value: asString(tool.interpreter),
+          placeholder: 'C:/venvs/myproj/Scripts/python.exe 或 python',
+          onChange: (next) => set({ interpreter: next }),
+        })))
+        modeRows.push(h(Field, {
+          key: 'script',
+          label: '脚本路径',
+          hint: '这个文件本身不在插件里，改它要自己负责。',
+        }, h(TextInput, {
+          mono: true,
+          disabled,
+          value: asString(tool.script),
+          placeholder: 'C:/Users/me/tools/report.py',
+          onChange: (next) => set({ script: next }),
+        })))
+      }
+      if (mode === 'bash' || mode === 'powershell') {
+        modeRows.push(h(Field, {
+          key: 'command',
+          label: '命令文本（固定，模型改不了）',
+          hint: mode === 'bash'
+            ? '模型的值只经位置参数（"$@"）或环境变量进来，永远不会拼进这段文本。'
+            : '参数只能走 stdin JSON：-Command 之后的东西会进命令文本，不是 $args。',
+        }, h(TextArea, {
+          disabled,
+          value: asString(tool.command),
+          rows: 4,
+          placeholder: mode === 'bash' ? 'grep -rn -- "$@"' : '$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json',
+          onChange: (next) => set({ command: next }),
+        })))
+      }
 
-        open
-          ? h('div', { style: S.cardBody },
-            h(Panel, { title: '身份', last: false },
-              h('div', { style: S.grid2 },
-                h(Field, { label: '工具名', hint: '小写字母开头，a-z 0-9 _；这是模型看到的工具名' },
-                  h(TextInput, {
-                    value: draftName,
-                    disabled,
-                    mono: true,
-                    placeholder: 'my_tool',
-                    onChange: (next) => set({ name: next }),
-                  })),
-                h(Field, { label: '标题（可选）', hint: '界面显示用，不进模型上下文' },
-                  h(TextInput, {
-                    value: asString(tool.title),
-                    disabled,
-                    onChange: (next) => set({ title: next }),
-                  }))),
-              h(Field, { label: '描述', hint: '模型据此决定是否调用：写清用途与边界' },
-                h(TextArea, {
-                  value: asString(tool.description),
-                  disabled,
-                  rows: 2,
-                  mono: false,
-                  onChange: (next) => set({ description: next }),
-                })),
-              h(Field, { label: '何时使用（可选）', hint: '会追加到描述后面，作为 When to use 段落' },
-                h(TextArea, {
-                  value: asString(tool.whenToUse),
-                  disabled,
-                  rows: 2,
-                  mono: false,
-                  onChange: (next) => set({ whenToUse: next }),
-                }))),
+      const customCwd = typeof tool.cwd === 'string' && tool.cwd !== '' && tool.cwd !== '.'
 
-            h(Panel, {
-              title: '命令',
-              action: h(Segmented, {
-                value: mode,
-                options: MODES,
-                disabled,
-                render: (option) => MODE_LABEL[option],
-                onChange: (next) => set({ mode: next }),
-              }),
-            },
-            target),
+      const diagnostics = errors.length === 0 && warnings.length === 0
+        ? h('div', { style: S.ok }, '✓ 本地检查通过；保存后由宿主最终校验')
+        : h('div', { style: S.issues },
+          ...errors.map((issue) => h('div', { key: `e-${issue.path}` },
+            `• ${issue.path}: ${issue.message}`)),
+          ...warnings.map((issue) => h('div', {
+            key: `w-${issue.path}`,
+            style: { color: C.warning },
+          }, `• ${issue.path}: ${issue.message}`)))
 
-            h(BindingsPanel, {
-              tool,
+      return h('div', { style: open ? { ...S.card, ...S.cardOpen } : S.card },
+        h('div', { style: S.cardHead, onClick: () => setOpen((value) => !value) },
+          h('span', { style: S.twist }, open ? '▼' : '▶'),
+          h('span', { style: S.cardName }, committed.current || '（未命名）'),
+          asString(tool.name) !== committed.current
+            ? h(Chip, { key: 'unsaved', tone: 'dirty' }, '未保存')
+            : null,
+          h(Chip, { key: 'mode', tone: 'mode' }, MODE_LABEL[mode] ?? mode),
+          errors.length > 0 ? h(Chip, { key: 'err', tone: 'bad' }, `${errors.length} 处错误`) : null,
+          tool.enabled === false ? h(Chip, { key: 'off' }, '已停用') : null,
+          h('span', { key: 'grow', style: S.grow }),
+          h('span', { onClick: (event) => event.stopPropagation(), style: { display: 'inline-flex' } },
+            h(Switch, {
+              checked: tool.enabled !== false,
               disabled,
-              onChange: (patch) => set(patch),
-            }),
-
-            h(ParametersPanel, {
-              tool,
-              disabled,
-              onChange: (patch) => set(patch),
-            }),
-
-            h(Panel, { title: '执行' },
-              h('div', { style: S.grid3 },
-                h(Field, {
-                  label: '工作目录',
-                  hint: customCwd ? '模型的参数改不了它' : '用会话当前目录，会话换目录它也跟着换',
-                },
-                h('div', { style: { display: 'grid', gap: 4 } },
-                  h(Segmented, {
-                    value: customCwd ? 'custom' : 'session',
-                    options: ['session', 'custom'],
-                    disabled,
-                    render: (option) => (option === 'session' ? '会话目录' : '指定路径'),
-                    onChange: (next) => set({ cwd: next === 'session' ? undefined : (customCwd ? asString(tool.cwd) : 'C:/') }),
-                  }),
-                  customCwd
-                    ? h(TextInput, {
-                      value: asString(tool.cwd),
-                      disabled,
-                      mono: true,
-                      placeholder: 'C:/work/project',
-                      onChange: (next) => set({ cwd: next }),
-                    })
-                    : null)),
-                h(Field, { label: '超时（毫秒）', hint: '1000 – 600000' },
-                  h(NumberInput, {
-                    value: String(asNumber(tool.timeoutMs, 120000)),
-                    disabled,
-                    min: 1000,
-                    max: 600000,
-                    onChange: (next) => set({ timeoutMs: next === '' ? undefined : Number(next) }),
-                  })),
-                h(Field, { label: '审批', hint: '工具与宿主同权限运行，没有插件侧沙箱' },
-                  h(Select, {
-                    value: asString(tool.approval, 'inherit'),
-                    options: APPROVALS,
-                    disabled,
-                    render: (option) => APPROVAL_LABEL[option],
-                    onChange: (next) => set({ approval: next }),
-                  }))),
-              h('div', { style: S.grid3 },
-                h(Field, { label: '并发', hint: 'exclusive：同工具串行；parallel：允许重叠' },
-                  h(Select, {
-                    value: asString(tool.concurrency, 'exclusive'),
-                    options: CONCURRENCY,
-                    disabled,
-                    onChange: (next) => set({ concurrency: next }),
-                  })),
-                h(Field, { label: '输出解析' },
-                  h(Select, {
-                    value: asString(tool.output?.parse, 'text'),
-                    options: PARSES,
-                    disabled,
-                    onChange: (next) => set({ output: { ...(isObject(tool.output) ? tool.output : {}), parse: next } }),
-                  })),
-                h('div', { style: { display: 'grid', gap: 3, alignContent: 'end' } },
-                  h(Checkbox, {
-                    checked: tool.encodingDefaults !== false,
-                    disabled,
-                    label: '自动 UTF-8 编码默认值',
-                    onChange: (next) => set({ encodingDefaults: next ? undefined : false }),
-                  }))),
-              asString(tool.output?.parse, 'text') === 'json'
-                ? h(JsonField, {
-                  label: '输出 JSON Schema（字符串，可选）',
-                  hint: '成功输出必须满足它，否则报 OUTPUT_SCHEMA_MISMATCH',
-                  value: typeof tool.output?.schema === 'string' && tool.output.schema.trim() !== ''
-                    ? tryParseJson(tool.output.schema).value ?? {}
-                    : {},
-                  disabled,
-                  rows: 4,
-                  onChange: (next) => set({
-                    output: {
-                      ...(isObject(tool.output) ? tool.output : {}),
-                      parse: 'json',
-                      schema: next === null ? undefined : JSON.stringify(next),
-                    },
-                  }),
-                })
-                : null),
-
-            h(Panel, { title: '高级', last: true },
-              h(Field, { label: '环境变量', hint: '固定值，不来自模型；键名必须合法' },
-                h(JsonField, {
-                  label: '',
-                  value: isObject(tool.env) ? tool.env : {},
-                  disabled,
-                  rows: 3,
-                  onChange: (next) => set({ env: isObject(next) && Object.keys(next).length > 0 ? next : undefined }),
-                })),
-              h(JsonField, {
-                label: '凭据引用（credentials）',
-                hint: '形如 [{ "env": "GH_TOKEN", "ref": "github_token" }]；值每次调用时解析，不落盘',
-                value: Array.isArray(tool.credentials) ? tool.credentials : [],
+              onChange: (next) => set({ enabled: next }),
+            }))),
+        open ? h('div', { style: S.cardBody },
+          h(Panel, { title: '身份' },
+            h('div', { style: S.grid2 },
+              h(Field, {
+                label: '工具名',
+                hint: '小写字母开头，a-z 0-9 _；这是模型看到的工具名',
+              }, h(TextInput, {
+                mono: true,
                 disabled,
-                rows: 3,
-                onChange: (next) => set({ credentials: Array.isArray(next) && next.length > 0 ? next : undefined }),
-              }),
-              h(JsonField, {
-                label: '调用示例（examples）',
-                hint: '形如 [{ "name": "看最近改动", "args": "{\\"limit\\": 5}" }]',
-                value: Array.isArray(tool.examples) ? tool.examples : [],
-                disabled,
-                rows: 3,
-                onChange: (next) => set({ examples: Array.isArray(next) && next.length > 0 ? next : undefined }),
+                value: asString(tool.name),
+                onChange: (next) => set({ name: next }),
               })),
+              h(Field, {
+                label: '标题（可选）',
+                hint: '界面显示用，不进模型上下文',
+              }, h(TextInput, {
+                disabled,
+                value: asString(tool.title),
+                onChange: (next) => set({ title: next }),
+              }))),
+            h(Field, {
+              label: '描述',
+              hint: '模型据此决定是否调用：写清用途与边界',
+            }, h(TextArea, {
+              disabled,
+              rows: 3,
+              value: asString(tool.description),
+              onChange: (next) => set({ description: next }),
+            })),
+            h(Field, {
+              label: '何时使用（可选）',
+              hint: '会追加到描述后面，作为 When to use 段落',
+            }, h(TextArea, {
+              disabled,
+              rows: 2,
+              value: asString(tool.whenToUse),
+              onChange: (next) => set({ whenToUse: next }),
+            }))),
 
-            own.length > 0
-              ? h('ul', { style: { ...S.issues, marginTop: 8 } }, own.map((issue, i) => h('li', {
-                key: `issue-${i}`,
-                style: issue.severity === 'error' ? S.issueError : S.issueWarn,
+          h(Panel, {
+            title: '命令',
+            meta: MODE_LABEL[mode] ?? mode,
+          },
+          h(Segmented, {
+            value: mode,
+            disabled,
+            options: MODES.map((value) => ({ value, label: MODE_LABEL[value] })),
+            onChange: (next) => set({ mode: next }),
+          }),
+          ...modeRows),
+
+          h(Panel, { title: '执行预览', meta: '不执行，只是形状' }, h(PreviewStrip, { preview, mode })),
+
+          h(Panel, {
+            title: '命令片段',
+            meta: `${pieces.filter((piece) => piece.orphan !== true).length} 格`,
+          },
+          h('div', { style: S.toolbar },
+            h(Button, { kind: 'small', disabled, onClick: () => addPiece('literal') }, '＋ 字面值'),
+            h(Button, { kind: 'small', disabled, onClick: () => addPiece('variable') }, '＋ 变量'),
+            h(Button, { kind: 'small', disabled, onClick: () => addPiece('flag') }, '＋ 开关'),
+            mode === 'powershell' ? null : h(Button, {
+              kind: 'small',
+              disabled,
+              onClick: () => addPiece('stdin'),
+            }, '＋ stdin（JSON）')),
+          h('div', { style: S.pieces },
+            ...pieces.map((piece, at) => h(PieceRow, {
+              key: piece.id,
+              piece,
+              index: at,
+              total: pieces.length,
+              disabled,
+              mode,
+              onChange: (next) => {
+                if (next.kind === 'flag' && next.active !== undefined) {
+                  setFlagPreview((current) => ({ ...current, [next.id]: next.active === true }))
+                }
+                updatePiece(at, next)
               },
-              h('span', null, issue.severity === 'error' ? '✕' : '!'),
-              h('span', null, `${issue.path}: ${issue.message}`))))
-              : h('div', { style: { ...S.issues, marginTop: 8 } },
-                h('span', { style: S.issueOk }, '✓', ' 本地检查通过；保存后由宿主最终校验')),
+              onRemove: removePiece,
+              onMove: movePiece,
+            }))),
+          orphanCount > 0
+            ? h('div', { style: S.note },
+              `有 ${orphanCount} 个参数没有出现在命令行里：把它们拖进「命令片段」，或者删掉对应变量。`)
+            : null),
 
-            h('div', { style: { ...S.toolbar, marginTop: 10 } },
-              h(Button, { kind: 'small', disabled, onClick: () => onDuplicate(index) }, '复制'),
-              h(Button, { kind: 'small', disabled: disabled || index === 0, onClick: () => onMove(index, -1) }, '↑ 上移'),
-              h(Button, { kind: 'small', disabled: disabled || index === total - 1, onClick: () => onMove(index, 1) }, '↓ 下移'),
-              h('span', { style: S.grow }),
-              h(Button, { kind: 'danger', disabled, onClick: () => onRemove(index) }, '删除这个工具')))
-          : null)
+          h(Panel, { title: '执行' },
+            h('div', { style: S.grid2 },
+              h(Field, {
+                label: '工作目录',
+              }, h(Segmented, {
+                value: customCwd ? 'custom' : 'session',
+                disabled,
+                options: [
+                  { value: 'session', label: '会话目录' },
+                  { value: 'custom', label: '指定路径' },
+                ],
+                onChange: (next) => set({ cwd: next === 'session' ? undefined : (asString(tool.cwd) || '/') }),
+              })),
+              h(Field, {
+                label: '超时（毫秒）',
+                hint: '1000 – 600000',
+              }, h(NumberInput, {
+                disabled,
+                min: 1000,
+                max: 600000,
+                step: 1000,
+                value: asNumber(tool.timeoutMs, 120000),
+                onChange: (next) => set({ timeoutMs: next === '' ? undefined : Number(next) }),
+              }))),
+            customCwd
+              ? h(Field, {
+                label: '绝对路径',
+                hint: '模型改不了这个路径',
+              }, h(TextInput, {
+                mono: true,
+                disabled,
+                value: asString(tool.cwd),
+                placeholder: 'C:/work/project',
+                onChange: (next) => set({ cwd: next }),
+              }))
+              : h('div', { style: S.hint }, '用会话当前的工作目录；想钉死就切到「指定路径」。'),
+            h('div', { style: S.grid2 },
+              h(Field, { label: '审批' }, h(Select, {
+                value: asString(tool.approval, 'inherit'),
+                disabled,
+                options: APPROVALS,
+                labels: APPROVAL_LABEL,
+                onChange: (next) => set({ approval: next }),
+              })),
+              h(Field, {
+                label: '并发',
+                hint: 'exclusive：同一工具串行；parallel：允许重叠',
+              }, h(Select, {
+                value: asString(tool.concurrency, 'exclusive'),
+                disabled,
+                options: CONCURRENCY,
+                labels: CONCURRENCY_LABEL,
+                onChange: (next) => set({ concurrency: next }),
+              }))),
+            h('div', { style: S.grid2 },
+              h(Field, {
+                label: '输出解析',
+                hint: 'json 会用 output.schema 校验',
+              }, h(Select, {
+                value: asString(tool.output?.parse, 'text'),
+                disabled,
+                options: PARSES,
+                onChange: (next) => set({ output: { ...(isObject(tool.output) ? tool.output : {}), parse: next } }),
+              })),
+              h(Field, { label: '编码默认值' },
+                h(Checkbox, {
+                  checked: tool.encodingDefaults !== false,
+                  disabled,
+                  label: '自动注入 UTF-8 环境（python/java）',
+                  onChange: (next) => set({ encodingDefaults: next }),
+                }))),
+          asString(tool.output?.parse, 'text') === 'json'
+            ? h(Field, {
+              label: '输出 schema（JSON Schema 子集，JSON 文本）',
+              hint: '失败会报 OUTPUT_SCHEMA_MISMATCH',
+            }, h(JsonField, {
+              disabled,
+              rows: 4,
+              value: asString(tool.output?.schema) === '' ? undefined : tryParseJson(asString(tool.output?.schema)).value,
+              placeholder: '{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"],"additionalProperties":false}',
+              onChange: (next) => set({
+                output: { ...(isObject(tool.output) ? tool.output : {}), schema: next === undefined ? undefined : JSON.stringify(next) },
+              }),
+            }))
+            : null),
+
+          h(Panel, {
+            title: '高级',
+            meta: '固定值，不来自模型',
+            last: true,
+          },
+          h(Field, { label: '环境变量' }, h(JsonField, {
+            disabled,
+            rows: 3,
+            value: tool.env,
+            placeholder: '{"NO_COLOR":"1"}',
+            onChange: (next) => set({ env: next }),
+          })),
+          h(Field, {
+            label: '凭据引用（credentials）',
+            hint: '形如 [{"env":"GH_TOKEN","ref":"github_token"}]；值每次调用时解析，不落盘',
+          }, h(JsonField, {
+            disabled,
+            rows: 3,
+            value: tool.credentials,
+            placeholder: '[{"env":"GH_TOKEN","ref":"github_token"}]',
+            onChange: (next) => set({ credentials: next }),
+          })),
+          h(Field, { label: '调用示例（examples）' }, h(JsonField, {
+            disabled,
+            rows: 3,
+            value: tool.examples,
+            placeholder: '[{"name":"格式化一个配置文件","args":{"path":"./package.json"}}]',
+            onChange: (next) => set({ examples: next }),
+          }))),
+
+          h('div', { style: S.toolbar },
+            h(Button, { kind: 'small', disabled, onClick: () => onDuplicate(index) }, '复制'),
+            h(Button, { kind: 'small', disabled: disabled || index === 0, onClick: () => onMove(index, -1) }, '↑ 上移'),
+            h(Button, { kind: 'small', disabled: disabled || index === total - 1, onClick: () => onMove(index, 1) }, '↓ 下移'),
+            h('span', { style: S.grow }),
+            h(Button, { kind: 'danger', disabled, onClick: () => onRemove(index) }, '删除这个工具')),
+          diagnostics)
+        : null)
     }
 
-    // ------------------------------------------------------------------- page
+    // ------------------------------------------------------------------ page
 
-    /** Build the page component bound to the live client context. */
     function makeSectionPage(ctx) {
       // `remote.settings` is a guarded service name: reading `ctx.remote.settings`
       // throws unless it is declared in inject, which it now is. `ctx.get()` is
@@ -1636,8 +1908,6 @@ window.__ModuleLoader__.load({
         // whole card on every keystroke, which steals focus from the name input.
         const rowIds = React.useRef([])
         const nextRowId = React.useRef(1)
-        // Sample values for the argv strip: UI-only, never written back.
-        const [samples, setSamples] = React.useState({})
 
         async function load() {
           setPhase('loading')
@@ -1665,7 +1935,6 @@ window.__ModuleLoader__.load({
             rowIds.current = config.tools.map(() => nextRowId.current++)
             setDraft(config)
             setSaved(clone(config))
-            setSamples({})
             setRevision(view.revision)
             setSavedAt((count) => count + 1)
             setPhase('ready')
@@ -1726,13 +1995,6 @@ window.__ModuleLoader__.load({
         const addTool = (kind) => {
           rowIds.current = [...rowIds.current, nextRowId.current++]
           edit({ ...config, tools: [...config.tools, clone(TEMPLATES[kind])] })
-        }
-        const setSample = (index, name, value) => {
-          setSamples((current) => {
-            const forTool = { ...(current[index] ?? {}) }
-            forTool[name] = value
-            return { ...current, [index]: forTool }
-          })
         }
 
         const save = async () => {
@@ -1842,8 +2104,6 @@ window.__ModuleLoader__.load({
             disabled: busy,
             savedAt,
             issues,
-            samples,
-            onSample: setSample,
             onChange: (next) => setTool(index, next),
             onRemove: removeTool,
             onMove: moveTool,
@@ -1891,11 +2151,11 @@ window.__ModuleLoader__.load({
         })
       },
       /**
-       * Exposed for `test/client.test.js` only. The preview must agree with
-       * `src/compiler/bindings.js` byte for byte, and that is only checkable if
-       * the function is reachable from a test harness.
+       * Exposed for `test/client.test.js` only. `piecesOf`/`applyPieces` are the
+       * one conversion that could silently eat a field, so they are reachable
+       * from a test harness instead of being trusted by inspection.
        */
-      __internal: { previewInvocation, collectIssues, sampleValues, planOf },
+      __internal: { piecesOf, applyPieces, previewOf, collectIssues, slotText },
     }
   },
 })
