@@ -83,14 +83,15 @@ function validateParameter(toolName, paramName, spec, path, issues) {
       `参数 ${paramName} 不是数组，items 会被忽略`))
   }
 
-  if (spec.enum !== undefined) {
+  // An empty `enum` is how the settings schema serialises "no enum at all", so
+  // it must mean "no constraint" — rejecting it turned every UI-authored tool
+  // into a compile error.
+  const enumValues = Array.isArray(spec.enum) ? spec.enum : []
+  if (enumValues.length > 0) {
     if (type !== 'string') {
       issues.push(fail(toolName, `${path}.enum`, 'PARAMETER_ENUM_TYPE',
         `enum 仅支持 string 参数（${paramName} 是 ${type}）`))
-    } else if (spec.enum.length === 0) {
-      issues.push(fail(toolName, `${path}.enum`, 'PARAMETER_ENUM_EMPTY',
-        `参数 ${paramName} 的 enum 不能为空`))
-    } else if (new Set(spec.enum).size !== spec.enum.length) {
+    } else if (new Set(enumValues).size !== enumValues.length) {
       issues.push(fail(toolName, `${path}.enum`, 'PARAMETER_ENUM_DUPLICATE',
         `参数 ${paramName} 的 enum 有重复选项`))
     }

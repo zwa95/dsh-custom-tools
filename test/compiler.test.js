@@ -134,6 +134,13 @@ test('defaults are applied, unknown arguments rejected', () => {
   assert.equal(enumMiss.ok, false)
 })
 
+test('an empty enum from the settings schema means "no enum", not an error', () => {
+  const { errors } = validateSnapshot({
+    tools: [spec({ name: 'echo', parameters: { value: { type: 'string', required: true, enum: [] } } })],
+  })
+  assert.deepEqual(errors.map((issue) => issue.code), [])
+})
+
 test('validation catches cross-field mistakes', () => {
   const { errors } = validateSnapshot({
     tools: [
