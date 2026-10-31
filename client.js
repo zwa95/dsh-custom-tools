@@ -577,6 +577,7 @@ window.__ModuleLoader__.load({
             originalAs: Array.isArray(as) ? [...as] : undefined,
             description: asString(spec.description),
             required: spec.required === true,
+            default: asString(spec.default),
             original: isObject(spec) ? clone(spec) : undefined,
           })
           return
@@ -652,7 +653,9 @@ window.__ModuleLoader__.load({
       if (description.trim() !== '') parameter.description = description
       else delete parameter.description
       const fallback = asString(piece.default)
-      if (fallback !== '') parameter.default = fallback
+      // `default: ""` is a real default for a string parameter, so an empty
+      // box only means "no default" when the stored one was not empty either.
+      if (fallback !== '' || base.default === '') parameter.default = fallback
       else delete parameter.default
       return parameter
     }

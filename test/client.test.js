@@ -237,6 +237,26 @@ const PARITY_CASES = [
     values: { dry: false },
   },
   {
+    label: 'a switch keeps its default and description',
+    spec: {
+      ...BASE,
+      args: [{ flag: 'reverse', as: '--reverse' }],
+      parameters: {
+        reverse: { type: 'boolean', default: 'false', description: 'sort descending' },
+      },
+    },
+    values: {},
+  },
+  {
+    label: 'an empty-string default is still a default',
+    spec: {
+      ...BASE,
+      args: [{ arg: 'prefix', omitIfEmpty: true }],
+      parameters: { prefix: { type: 'string', default: '' } },
+    },
+    values: {},
+  },
+  {
     label: 'repeat emits one element per item',
     spec: {
       ...BASE,
