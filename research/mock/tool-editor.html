@@ -527,10 +527,7 @@ function chipFor(item) {
 
   // A switch that is off still occupies its place in the structure; the dashed
   // frame says "may or may not be here", without pretending it is deleted.
-  if (item.absent === true) {
-    return `<span class="chip ${chipClass} ghost">${name}${escapeHtml(item.text)}</span>`
-  }
-  if (item.kind === 'flag' && item.active === false) {
+  if (item.absent === true || (item.kind === 'flag' && item.active === false)) {
     return `<span class="chip ${chipClass} ghost">${name}<i>${escapeHtml(item.text)}</i></span>`
   }
   const notes = (item.notes ?? []).length > 0
