@@ -718,3 +718,18 @@ test('the sandbox selector from the old mock is gone', () => {
   // the form would either be a lie or an unreachable setting.
   assert.doesNotMatch(source, /workspace-write|danger-full-access|read-only/u)
 })
+
+test('describe() is unwrapped before the namespace is looked up', () => {
+  const internals = clientInternals()
+  const view = { ns: 'include:custom-tools', revision: 4, value: { tools: [], deferLoading: false } }
+
+  // The remote answers with a wrapper, not with the bare list. Losing that
+  // unwrap shows "namespace missing" on a perfectly healthy plugin.
+  const wrapped = { namespaces: [view] }
+  assert.equal(internals.findNamespace(wrapped, 'custom-tools'), view)
+
+  // A scoped entry id is `include:custom-tools`; the bare id must still resolve.
+  assert.equal(internals.findNamespace([view], 'custom-tools'), view)
+  assert.equal(internals.findNamespace({ views: [view] }, 'custom-tools'), view)
+  assert.equal(internals.findNamespace({ namespaces: [view] }, 'other'), null)
+})

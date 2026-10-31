@@ -519,14 +519,24 @@ window.__ModuleLoader__.load({
     }
 
     function namespaceList(value) {
-      if (Array.isArray(value)) return value
-      if (isObject(value)) return Object.values(value)
+      // describe() answers with a wrapper (`{ namespaces: [...] }`, older builds
+      // say `views`), not with the bare list — unwrap first, then fall back.
+      const bag = value?.namespaces ?? value?.views ?? value
+      if (Array.isArray(bag)) return bag
+      if (isObject(bag)) return Object.values(bag)
       return []
     }
 
     function findNamespace(value, ns) {
-      return namespaceList(value).find((entry) => isObject(entry)
-        && (entry.ns === ns || entry.namespace === ns || entry.id === ns)) ?? null
+      const list = namespaceList(value)
+      const exact = list.find((entry) => isObject(entry)
+        && (entry.ns === ns || entry.namespace === ns || entry.id === ns))
+      if (exact !== undefined) return exact
+      // A scoped entry reports `include:custom-tools`; accept the suffix so the
+      // page keeps working whichever id the loader happens to hand out.
+      return list.find((entry) => isObject(entry)
+        && [entry.ns, entry.namespace, entry.id].some((candidate) => typeof candidate === 'string'
+          && candidate.endsWith(`:${ns}`))) ?? null
     }
 
     const EMPTY_CONFIG = { tools: [], deferLoading: false }
@@ -1903,6 +1913,7 @@ window.__ModuleLoader__.load({
         const [draft, setDraft] = React.useState(null)
         const [saved, setSaved] = React.useState(null)
         const [revision, setRevision] = React.useState(undefined)
+        const namespace = React.useRef(NS)
         const [busy, setBusy] = React.useState(false)
         // `savedAt` bumps on every successful load/save: cards use it to know
         // when the persisted name changed and the headline may be redrawn.
@@ -1934,6 +1945,7 @@ window.__ModuleLoader__.load({
               setProblem(`设置文档里没有命名空间 ${NS}：插件可能未启用，或加载失败。`)
               return
             }
+            namespace.current = asString(view.ns ?? view.namespace ?? view.id, NS)
             const config = readConfig(view.value)
             rowIds.current = config.tools.map(() => nextRowId.current++)
             setDraft(config)
@@ -2020,7 +2032,7 @@ window.__ModuleLoader__.load({
               { op: 'set', path: ['tools'], value: config.tools },
               { op: 'set', path: ['deferLoading'], value: config.deferLoading === true },
             ]
-            const result = unwrap(await api.mutate(NS, ops, revision))
+            const result = unwrap(await api.mutate(namespace.current, ops, revision))
             if (!result.ok) {
               setBanner({
                 tone: 'bad',
@@ -2158,7 +2170,7 @@ window.__ModuleLoader__.load({
        * one conversion that could silently eat a field, so they are reachable
        * from a test harness instead of being trusted by inspection.
        */
-      __internal: { piecesOf, applyPieces, previewOf, collectIssues, slotText },
+      __internal: { piecesOf, applyPieces, previewOf, collectIssues, slotText, findNamespace, readConfig },
     }
   },
 })
