@@ -1,6 +1,6 @@
 {
   "name": "dsh-custom-tools",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Declare local executables, scripts, bash and PowerShell commands as Agent tools with exact argv mapping, hot reload and a settings page.",
   "type": "module",
   "main": "index.js",
