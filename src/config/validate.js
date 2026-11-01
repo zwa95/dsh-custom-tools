@@ -26,7 +26,7 @@ export const RESERVED_NAMES = new Set([
   'task', 'todo', 'todo_write', 'subagent', 'workflow', 'skill',
   'send_message', 'ask_user_question', 'create_goal', 'update_goal', 'get_goal',
   'compress', 'decompress', 'search_context', 'acp_status',
-  'custom_tools', 'custom-tools',
+  'custom_tools', 'custom-tools', 'custom_tools_propose', 'custom_tools_schema',
 ])
 
 const fail = (tool, path, code, message) => ({
@@ -49,6 +49,92 @@ const isPlainObject = (value) =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
 /**
+ * Every key a stored definition may carry, grouped by where it lives.
+ *
+ * These lists exist so that a misspelt or invented key is reported instead of
+ * being silently dropped. Silence is the expensive failure here: a model that
+ * writes `execution` instead of `mode` would otherwise get "executable 模式必须
+ * 给出 executable" and go on patching the wrong shape.
+ */
+const TOOL_KEYS = [
+  'name', 'title', 'description', 'whenToUse', 'mode', 'enabled',
+  'executable', 'interpreter', 'script', 'command',
+  'args', 'cwd', 'approval', 'concurrency', 'timeoutMs',
+  'env', 'encodingDefaults', 'credentials', 'parameters', 'output', 'examples',
+  // Retired fields: kept out of the "unknown key" list so they still get their
+  // own targeted "this no longer does anything" warning.
+  'scriptSha256', 'scriptTrust',
+]
+
+const BINDING_KEYS = [
+  'literal', 'arg', 'flag', 'as', 'prefix', 'suffix', 'join', 'repeat', 'json',
+  'stdin', 'omitIfEmpty', 'allowLeadingDash', 'allowResponseFile',
+]
+
+const PARAMETER_KEYS = [
+  'type', 'items', 'required', 'default', 'description',
+  'min', 'max', 'minLength', 'maxLength',
+]
+
+const CREDENTIAL_KEYS = ['env', 'ref']
+const EXAMPLE_KEYS = ['name', 'args']
+const OUTPUT_KEYS = ['parse', 'schema']
+
+/** Levenshtein distance, bounded: these strings are all short. */
+function distance(left, right) {
+  const rows = left.length + 1
+  const columns = right.length + 1
+  let previous = Array.from({ length: columns }, (_, index) => index)
+  for (let row = 1; row < rows; row += 1) {
+    const current = [row]
+    for (let column = 1; column < columns; column += 1) {
+      const substitution = previous[column - 1] + (left[row - 1] === right[column - 1] ? 0 : 1)
+      current[column] = Math.min(previous[column] + 1, current[column - 1] + 1, substitution)
+    }
+    previous = current
+  }
+  return previous[columns - 1]
+}
+
+/** The allowed key the author most likely meant, or undefined when unsure. */
+function closestKey(key, allowed) {
+  const lowered = key.toLowerCase()
+  let best
+  let bestScore = Number.POSITIVE_INFINITY
+  for (const candidate of allowed) {
+    const candidateLowered = candidate.toLowerCase()
+    const score = candidateLowered.startsWith(lowered) || lowered.startsWith(candidateLowered)
+      ? 0
+      : distance(lowered, candidateLowered)
+    if (score < bestScore) {
+      bestScore = score
+      best = candidate
+    }
+  }
+  const limit = Math.max(2, Math.floor(key.length / 3))
+  return bestScore <= limit ? best : undefined
+}
+
+/**
+ * Report keys that no reader would ever look at.
+ *
+ * @param {string|undefined} toolName tool being validated, for the issue row
+ * @param {object} object record to inspect
+ * @param {string[]} allowed keys that have meaning at this position
+ * @param {string} path dotted path of `object`
+ * @param {object[]} issues collector
+ * @param {string} where human label for the position, e.g. `参数 path 上的`
+ */
+function checkKeys(toolName, object, allowed, path, issues, where) {
+  for (const key of Object.keys(object)) {
+    if (allowed.includes(key)) continue
+    const guess = closestKey(key, allowed)
+    issues.push(fail(toolName, `${path}.${key}`, 'UNKNOWN_KEY',
+      `${where}没有 ${key} 这个字段${guess ? `，是否想写 ${guess}？` : ''}。可用字段：${allowed.join(', ')}`))
+  }
+}
+
+/**
  * Absolute on either platform, because a definition written on Windows may be
  * read on Linux and the rule must not depend on where it is validated.
  */
@@ -69,6 +155,7 @@ function validateParameter(toolName, paramName, spec, path, issues) {
     issues.push(fail(toolName, path, 'PARAMETER_SHAPE', `参数 ${paramName} 必须是对象`))
     return
   }
+  checkKeys(toolName, spec, PARAMETER_KEYS, path, issues, `参数 ${paramName} 上`)
 
   const type = spec.type
   if (!['string', 'number', 'integer', 'boolean', 'array'].includes(type)) {
@@ -80,10 +167,13 @@ function validateParameter(toolName, paramName, spec, path, issues) {
   if (type === 'array') {
     if (!spec.items) {
       issues.push(fail(toolName, path, 'PARAMETER_ITEMS',
-        `数组参数 ${paramName} 必须声明 items`))
+        `数组参数 ${paramName} 必须声明 items，写成元素类型名，例如 "items": "string"`))
     } else if (!['string', 'number', 'integer', 'boolean'].includes(spec.items)) {
+      // The element type is a bare name, not a nested schema — a model that has
+      // just written a JSON Schema will reach for { "type": "string" } here.
       issues.push(fail(toolName, path, 'PARAMETER_ITEMS',
-        `数组参数 ${paramName} 的 items 只能是标量类型`))
+        `数组参数 ${paramName} 的 items 写成元素类型名，例如 "items": "string"；`
+        + `不能写成 { "type": "string" } 这样的嵌套 schema。当前是 ${JSON.stringify(spec.items)}`))
     }
   } else if (spec.items !== undefined) {
     issues.push(warn(toolName, `${path}.items`, 'PARAMETER_ITEMS_IGNORED',
@@ -101,10 +191,24 @@ function validateParameter(toolName, paramName, spec, path, issues) {
   }
 
   if (spec.default !== undefined && spec.default !== '') {
-    const parsed = tryParseJson(spec.default)
-    if (!parsed.ok) {
-      issues.push(fail(toolName, `${path}.default`, 'PARAMETER_DEFAULT_JSON',
-        `参数 ${paramName} 的 default 不是合法 JSON：${parsed.error}`))
+    // A default is JSON *text* — a string whose content is the JSON. A number
+    // written bare (`default: 20`) validated here but then failed at call time
+    // with "参数 count 必须是数字", because the runtime parses the text. Reject
+    // it at the definition instead, where the message can show the fix.
+    if (typeof spec.default !== 'string') {
+      issues.push(fail(toolName, `${path}.default`, 'PARAMETER_DEFAULT_TEXT',
+        `参数 ${paramName} 的 default 要写成 JSON 文本（带引号的字符串），当前是 ${JSON.stringify(spec.default)}；`
+        + `应写成 ${JSON.stringify(JSON.stringify(spec.default))}`))
+    } else {
+      const parsed = tryParseJson(spec.default)
+      if (!parsed.ok) {
+        // A plain "." looks fine and is not JSON. Say what to write instead of
+        // only what is wrong — a model wrote `"."` here believing the sample's
+        // escaped form was the mistake.
+        issues.push(fail(toolName, `${path}.default`, 'PARAMETER_DEFAULT_JSON',
+          `参数 ${paramName} 的 default 要以 JSON 文本给出：字符串写成 ${JSON.stringify(JSON.stringify(String(spec.default)))}，`
+          + '数字写成 "20"，布尔写成 "false"。当前值不是合法 JSON：' + parsed.error))
+      }
     }
   }
 }
@@ -128,9 +232,11 @@ function validateArgs(tool, path, issues) {
   args.forEach((binding, index) => {
     const at = `${path}.args[${index}]`
     if (!isPlainObject(binding)) {
-      issues.push(fail(tool.name, at, 'ARG_SHAPE', '每个 arg 条目必须是对象'))
+      issues.push(fail(tool.name, at, 'ARG_SHAPE',
+        `每个 arg 条目必须是对象；固定参数写成 { "literal": "${typeof binding === 'string' ? binding : '...'}" }，取值写成 { "arg": "参数名" }`))
       return
     }
+    checkKeys(tool.name, binding, BINDING_KEYS, at, issues, 'arg 条目上')
 
     const shape = bindingShape(binding)
     const hasStdin = binding.stdin !== undefined
@@ -327,6 +433,7 @@ export function validateTool(tool, path = 'tools[0]') {
     issues.push(fail(undefined, path, 'TOOL_SHAPE', '每个工具必须是对象'))
     return issues
   }
+  checkKeys(undefined, tool, TOOL_KEYS, path, issues, '工具定义里')
 
   if (typeof tool.name !== 'string' || !NAME_PATTERN.test(tool.name)) {
     issues.push(fail(tool.name, `${path}.name`, 'TOOL_NAME_FORMAT',
@@ -368,13 +475,24 @@ export function validateTool(tool, path = 'tools[0]') {
   }
 
   if (isPlainObject(tool.parameters)) {
-    for (const [paramName, spec] of Object.entries(tool.parameters)) {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(paramName)) {
-        issues.push(fail(tool.name, `${path}.parameters.${paramName}`, 'PARAMETER_NAME',
-          `参数名 ${paramName} 必须是合法标识符`))
-        continue
+    // The most common wrong shape by far: a JSON Schema pasted in where the
+    // plugin wants a `name → spec` map. Detect it once instead of reporting
+    // three bogus "parameter type/properties/required" rows.
+    const looksLikeSchema = tool.parameters.type === 'object'
+      || Object.hasOwn(tool.parameters, 'properties')
+      || Object.hasOwn(tool.parameters, 'additionalProperties')
+    if (looksLikeSchema) {
+      issues.push(fail(tool.name, `${path}.parameters`, 'PARAMETERS_IS_SCHEMA',
+        'parameters 要写成「参数名 → 规格」的映射，不是一份 JSON Schema；例如 pattern: { type: "string", required: true, description: "要找的字符串" }'))
+    } else {
+      for (const [paramName, spec] of Object.entries(tool.parameters)) {
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(paramName)) {
+          issues.push(fail(tool.name, `${path}.parameters.${paramName}`, 'PARAMETER_NAME',
+            `参数名 ${paramName} 必须是合法标识符`))
+          continue
+        }
+        validateParameter(tool.name, paramName, spec, `${path}.parameters.${paramName}`, issues)
       }
-      validateParameter(tool.name, paramName, spec, `${path}.parameters.${paramName}`, issues)
     }
   }
 
@@ -386,6 +504,7 @@ export function validateTool(tool, path = 'tools[0]') {
         issues.push(fail(tool.name, at, 'CREDENTIAL_SHAPE', '凭据条目必须是对象'))
         return
       }
+      checkKeys(tool.name, binding, CREDENTIAL_KEYS, at, issues, '凭据条目上')
       if (typeof binding.env !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(binding.env)) {
         issues.push(fail(tool.name, `${at}.env`, 'CREDENTIAL_ENV',
           '凭据的 env 必须是合法环境变量名'))
@@ -407,6 +526,7 @@ export function validateTool(tool, path = 'tools[0]') {
   }
 
   if (isPlainObject(tool.output)) {
+    checkKeys(tool.name, tool.output, OUTPUT_KEYS, `${path}.output`, issues, 'output 里')
     if (tool.output.parse === 'json' && tool.output.schema !== undefined
       && tool.output.schema !== '') {
       const parsed = tryParseJson(tool.output.schema)
@@ -428,6 +548,7 @@ export function validateTool(tool, path = 'tools[0]') {
         issues.push(fail(tool.name, at, 'EXAMPLE_SHAPE', '示例必须是对象'))
         return
       }
+      checkKeys(tool.name, example, EXAMPLE_KEYS, at, issues, '示例上')
       if (typeof example.name !== 'string' || example.name.trim() === '') {
         issues.push(fail(tool.name, `${at}.name`, 'EXAMPLE_NAME', '示例必须有名字'))
       }

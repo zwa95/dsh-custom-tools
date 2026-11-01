@@ -423,7 +423,6 @@ window.__ModuleLoader__.load({
         background: 'rgba(255,255,255,.04)',
         whiteSpace: 'pre',
       },
-      chipGhost: { borderStyle: 'dashed', borderColor: C.borderL2, opacity: 0.62 },
       chipEmpty: { borderStyle: 'dashed', borderColor: C.borderL1, color: C.textTertiary },
       pieceHead: { display: 'flex', gap: 6, alignItems: 'center' },
       pieceKind: { width: 96, flex: 'none' },
@@ -503,7 +502,7 @@ window.__ModuleLoader__.load({
     const PIECE_LABEL = {
       literal: '字面值',
       variable: '变量',
-      flag: '开关',
+      flag: 'flag',
       stdin: 'stdin',
     }
 
@@ -895,10 +894,10 @@ window.__ModuleLoader__.load({
         // variable
         if (piece.rawStdin === true) continue
         if (toStdin) continue
+        // An array is still one variable: the slot is where its values land, and
+        // how many argv elements that becomes is the engine's business. Drawing
+        // a second, ghosted copy said "repeat" but read as "two parameters".
         argv.push({ kind: 'variable', name: asString(piece.name), text: slotText(piece) })
-        if (piece.repeat === true) {
-          argv.push({ kind: 'variable', name: '', text: slotText(piece), absent: true, notes: '…逐项' })
-        }
       }
 
       return { argv, stdin, toStdin }
@@ -1005,10 +1004,10 @@ window.__ModuleLoader__.load({
           }
           if (binding.flag !== undefined) {
             const spec = parameters[binding.flag]
-            if (!isObject(spec)) at(where, `开关引用了未声明的参数 ${binding.flag}`)
-            else if (spec.type !== 'boolean') at(where, `开关必须引用 boolean 参数，${binding.flag} 是 ${spec.type}`)
-            if (binding.as === undefined) at(where, '开关要写 as：值为 true 时插入的 argv 元素')
-            if (binding.stdin !== undefined) at(where, '开关不能同时使用 stdin')
+            if (!isObject(spec)) at(where, `flag 引用了未声明的参数 ${binding.flag}`)
+            else if (spec.type !== 'boolean') at(where, `flag 必须引用 boolean 参数，${binding.flag} 是 ${spec.type}`)
+            if (binding.as === undefined) at(where, 'flag 要写 as：值为 true 时插入的 argv 元素')
+            if (binding.stdin !== undefined) at(where, 'flag 不能同时使用 stdin')
             return
           }
           if (binding.literal !== undefined) {
@@ -1558,7 +1557,7 @@ window.__ModuleLoader__.load({
         }
         if (isVariable || isFlag) {
           const fields = [
-            h(Field, { key: 'type', label: '类型', info: isFlag ? '开关参数的取值恒为 boolean。' : undefined },
+            h(Field, { key: 'type', label: '类型', info: isFlag ? 'flag 参数的取值恒为 boolean。' : undefined },
               isFlag
                 ? h('div', { style: S.hint }, 'boolean')
                 : h(Select, {
@@ -1741,20 +1740,23 @@ window.__ModuleLoader__.load({
     }
 
     function PreviewStrip({ preview, mode }) {
+      // One box per argv element, and only the text the program will actually
+      // receive. A variable shows the slot shape (`<path>`, prefix and suffix
+      // included) and a flag shows the literal it expands to (`--quiet`) in a
+      // dashed box — the parameter name is the author's word, not the program's.
+      // An array gets no special treatment: it is one variable, one slot.
       const chips = preview.argv.map((item, index) => {
-        const ghost = item.absent === true || (item.kind === 'flag' && item.active !== true)
+        const conditional = item.kind === 'flag'
         const color = TONE[item.kind] ?? TONE.lit
         return h('span', {
           key: `${index}:${item.kind}:${item.text}`,
           title: item.notes ?? '',
           style: {
             ...S.chipBox,
-            ...(ghost ? S.chipGhost : null),
+            ...(conditional ? { borderStyle: 'dashed', borderColor: C.borderL2 } : null),
             color,
-            borderColor: ghost ? C.borderL2 : 'transparent',
           },
         },
-        item.name ? h('b', { style: { fontWeight: 600, fontSize: 10.5 } }, item.name) : null,
         h('span', null, item.text))
       })
 
@@ -1763,7 +1765,7 @@ window.__ModuleLoader__.load({
         ['script', '脚本 / 命令文本'],
         ['lit', '字面值'],
         ['variable', '变量'],
-        ['flag', '开关'],
+        ['flag', 'flag'],
         ['stdin', 'stdin'],
       ].map(([kind, label]) => h('span', { key: kind, style: S.legendItem },
         h('span', { style: { ...S.legendDot, background: TONE[kind] } }),
@@ -1789,12 +1791,12 @@ window.__ModuleLoader__.load({
 
       return h('div', { style: S.panelBody },
         h('div', { style: S.legend }, ...legend,
-          h('span', { key: 'ghost', style: S.legendItem }, '虚线：本次缺省')),
+          h('span', { key: 'ghost', style: S.legendItem }, '虚线：按条件出现')),
         h('div', { style: S.preview },
           chips.length > 0 ? chips : h('span', { style: S.previewEmpty }, '暂无 argv 元素')),
         stdinRow,
         h('div', { style: S.hint },
-          `${preview.argv.filter((item) => item.absent !== true).length} 个 argv 元素`
+          `${preview.argv.length} 个 argv 元素`
           + '：每个框对应程序收到的一个参数；值由调用方提供，此处只呈现结构。'))
     }
 
@@ -1877,7 +1879,9 @@ window.__ModuleLoader__.load({
       onMove,
       onDuplicate,
     }) {
-      const [open, setOpen] = React.useState(index === 0)
+      // Every card starts folded: the page is a list to scan first and open
+      // second, and an expanded card pushes the rest of the list off-screen.
+      const [open, setOpen] = React.useState(false)
       const [flagPreview, setFlagPreview] = React.useState({})
       const [menuOpen, setMenuOpen] = React.useState(false)
       const mine = issuesFor(issues, index)
@@ -2077,7 +2081,7 @@ window.__ModuleLoader__.load({
           }),
           ...modeRows),
 
-          h(Panel, { title: '执行预览', meta: '仅预览，不执行' }, h(PreviewStrip, { preview, mode })),
+          h(Panel, { title: '执行预览' }, h(PreviewStrip, { preview, mode })),
 
           h(Panel, {
             title: '命令片段',
@@ -2086,7 +2090,7 @@ window.__ModuleLoader__.load({
           h('div', { style: S.toolbar },
             h(Button, { kind: 'small', disabled, onClick: () => addPiece('literal') }, '＋ 字面值'),
             h(Button, { kind: 'small', disabled, onClick: () => addPiece('variable') }, '＋ 变量'),
-            h(Button, { kind: 'small', disabled, onClick: () => addPiece('flag') }, '＋ 开关'),
+            h(Button, { kind: 'small', disabled, onClick: () => addPiece('flag') }, '＋ flag'),
             mode === 'powershell' ? null : h(Button, {
               kind: 'small',
               disabled,

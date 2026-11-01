@@ -18,6 +18,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import { Manager } from './src/runtime/manager.js'
 import { registerCommands } from './src/commands/index.js'
+import { registerProposeTool } from './src/admin/propose.js'
+import { registerSchemaTool } from './src/admin/schema-tool.js'
 import { OUTPUT_SCHEMA } from './src/result/contract.js'
 
 /** The profile row id; it doubles as the settings namespace. */
@@ -117,4 +119,15 @@ export function apply(ctx, config) {
   ctx.effect(() => () => manager.dispose(), 'custom-tools: tools')
 
   registerCommands(ctx, { manager, namespace: name })
+
+  // The model's only write-shaped surface: a draft file. The human gate is
+  // `/custom-tools add`, the step that actually changes configuration — see
+  // src/admin/propose.js for why an approval prompt on top of it gated the same
+  // action twice.
+  registerProposeTool(ctx, { defineTool, registry, namespace: name })
+
+  // …and the read-only half: the field vocabulary and one valid example per
+  // mode, so a model with no repository context can write a correct definition
+  // instead of inventing `execution` blocks. See src/admin/schema-tool.js.
+  registerSchemaTool(ctx, { defineTool, registry, namespace: name })
 }

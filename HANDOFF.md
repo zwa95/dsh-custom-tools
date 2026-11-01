@@ -11,12 +11,13 @@
 | 项 | 值 |
 | --- | --- |
 | 仓库 | `C:\Users\mark\Desktop\dsh-custom-tools`（Git，`main`） |
-| 最新提交 | `3622823 docs: add a handoff snapshot and drop the last sandbox wording from the docs`；此后工作树有一笔未提交改动：`client.js` 改用宿主组件库重画设置页 + `package.json` 补 peer |
-| 规模 | `index.js` 120 行 + `client.js` 约 2360 行 + `src/**` 约 2900 行；测试 76 项全绿 |
+| 最新提交 | `ab1141b feat(client): rebuild the settings page on the host UI kit`；此后工作树有一笔未提交改动：`custom_tools_propose` 去审批 + `custom_tools_schema` 新增 + 校验器报未知键 |
+| 规模 | `index.js` 130 行 + `client.js` 约 2360 行 + `src/**` 约 3400 行；测试 94 项全绿 |
 | 宿主基线 | DSH `0.2.1-rc.3`、`@deepseek-ai/cordis` `4.0.5`、`@deepseek-ai/dsh-tools` `0.2.1-rc.3`、`@deepseek-ai/schemastery` `3.18.5`、本机 Node `v24.15.0` |
 | 安装形态 | `link:C:/Users/mark/Desktop/dsh-custom-tools`，装在 `~/.dsh/profiles/desktop`（应用 `plugin_manager` 装过，现在靠 link 生效） |
 | 用户现场 | 4 个可用工具：`python_pretty_json`（script）、`bash_grep`（bash）、`pwsh_recent_files`（powershell）、`rg_search`（executable） |
-| 设置页验收 | **已通过**（真机截图逐项核对，见 §7.1）：4 张卡片、开关、模式切换、下拉浮层、保存/放弃、红字删除都正常 |
+| 设置页验收 | **已通过**（真机截图逐项核对，见 §7.1）：4 张卡片、开关、模式切换、下拉浮层、⋯ 菜单、保存/放弃都正常 |
+| 给模型的管理面 | `custom_tools_schema`（只读速查）+ `custom_tools_propose`（校验后返回一行 `/custom-tools add <JSON>`，不写配置、不写文件），生效仍靠人执行那行命令（README「Agent-authored definitions」） |
 
 **这个插件的定位**（用户定的）：不是"把 agent 放出去"，而是"把用户的工具**收窄**成一条确定命令行"。模型只能影响声明过的 argv/stdin/env **值**，永远无法影响程序、脚本、命令文本、cwd、env 键名、凭据引用。
 
@@ -91,6 +92,9 @@ src/runtime/manager.js   代际管理：编译、提交、注册/注销、quiesc
 src/runtime/tool-slot.js 每个工具一个稳定 ToolDefinition + 在途调用集合
 src/runtime/generation.js    不可变代际 + refcount
 
+src/admin/propose.js     模型侧：custom_tools_propose，校验后返回一行 /custom-tools add <JSON>（不碰配置、不写文件、不申请审批）
+src/admin/schema-tool.js 模型侧：custom_tools_schema，字段表 + 每模式一份样例 + 现有工具
+
 src/commands/index.js    /custom-tools 命令族（list/status/show/preview/test/enable/disable/add/export）
 
 test/                    7 个测试文件，76 项
@@ -131,6 +135,7 @@ ctx (Cordis)  ──inject ['tools']──►  apply(ctx, config)
 - `export const inject = ['tools']` 是**唯一硬依赖**。`subprocess` / `shellEnv` / `workingDirectory` / `credentials` 全部用 getter 惰性 `ctx.get(...)`，缺了就按次报错（`CUSTOM_TOOL_INTERNAL`），不会让整个插件挂掉。
 - **`apply()` 绝对不能返回值**。Cordis 会把返回值当 effect 校验，返回普通对象就 `Invalid effect` → fiber 失败 → 所有 disposer 回滚 → 工具全部消失（这个 bug 让 echo 消失了很久，见 §8）。
 - 所有注册/监听都归 `ctx.effect`：`ctx.effect(() => ctx.on('loader/volatile-update', refresh))`、`ctx.effect(() => () => manager.dispose())`。
+- 除工具与命令外，还注册两个**给模型用的管理入口**（`src/admin/`）：`custom_tools_schema`（只读速查：字段表 + 每模式一份样例 + 用户现有工具）与 `custom_tools_propose`（校验后返回一行 `/custom-tools add <整份 JSON>`，缩进版同一条消息里给人核对）。两者都**不写任何东西**：配置只在人执行那行命令时变。propose 曾经带审批门、后来带草稿文件，两样都删了——add 那一步已经是 human gate；草稿则只是把同一份定义存第二遍（§8「别在 human gate 前面再加一道」）。
 
 ### 3.2 Client 半边
 
@@ -276,11 +281,12 @@ powershell   [exe, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', comma
 
 要点：
 
-- 预览只画**形状**（一个真实 argv 元素一个框，变量画成 `<path>` 而不是值）；`repeat` 多画一个虚线虚位框；`stdin` 画成"JSON 键"。
+- 预览只画**形状**（一个真实 argv 元素一个框）。框里只有程序真正收到的那段文本：变量是 `<path>`（前后缀一起画进去），flag 是虚线框里的 `--sort` —— 参数名是作者的话，不是程序的话，只出现在左侧片段行。**数组不做特殊呈现**：它就是一种变量、占一格，几个元素变成几个 argv 是调用期的事（曾用"实体格 + 虚线格"表示 repeat，被判定为把"一个参数"读成"两个参数"）。`stdin` 画成"JSON 键"。卡片默认全部折叠（列表先扫后开）。
+- 布尔开关统一叫 **flag**（预览图例、片段类型、`＋ flag` 按钮、校验文案都是这个词），"开关"这个词在界面上不再出现——它让人以为是 UI 上的开关，而它其实是"为真时插入这个 argv 元素"。
 - powershell 模式自动走 stdin，不再逐变量问"传递方式"（那是模式的属性，不是变量的属性）。
 - 选项行的标题本身就是人话（"一个值占一格，有几个值就占几个格"），说明紧跟其后。
 - 页面自诊断 `collectIssues` 镜像 `src/config/validate.js`；未编辑的字段（`min`/`max`/`minLength`/`maxLength`）经 `parameterOf` 原样保留；孤儿参数（没有绑定的）以 `orphan` 片段保留，保存时不会静默丢弃。
-- 改草稿用稳定 `rowIds` 做 React key（否则改名会重挂卡片、打断输入）；`JsonField` 按**序列化内容**比较，不能按对象身份比较。
+- 编辑态（页面里的 draft 文档，不是已删除的草稿文件）用稳定 `rowIds` 做 React key（否则改名会重挂卡片、打断输入）；`JsonField` 按**序列化内容**比较，不能按对象身份比较。
 
 ### 7.1 控件层用宿主组件库
 
@@ -338,6 +344,25 @@ DSH 的 Web UI 走 `127.0.0.1:54438` 且要 token（401），但**桌面窗口�
 ---
 
 ## 8. 决策日志（踩过的坑，别再踩）
+
+### 别在 human gate 前面再加一道门
+
+`custom_tools_propose` 最初在写草稿前调 `ctx.approval.request()`。两个问题：
+
+1. **重复门控**：真正改配置的是人跑 `/custom-tools add`，那一步已经是 human in the loop。
+2. **静默拒绝**：`decide()` 在 `effectivePolicy(session) === 'never'` 时**不弹卡片**、直接返回 `rejected`。设置页的「完全权限」档正是 `never`，于是模型得到"用户拒绝了这次提议"，而用户屏幕上什么都没出现——我按 `rejected` 写文案时把人搞懵了（用户原话"我没有看到审批提示"）。权限档与 policy 的映射在 `@deepseek-ai/dsh-permission-presets/lib/index.js:141-155`，`NEVER_SENTENCE` 在 `@deepseek-ai/dsh-user-approval/lib/index.js:39`。
+
+现在的契约：propose **只校验、只返回一行命令**，不写配置、不写文件、不申请审批。中间那一版还写过草稿文件（`~/.dsh/custom-tools/drafts/<name>.json`），用户判定为"鸡肋"并砍掉——理由是：草稿要有人读才有意义，而能读它的只有人；于是同一份定义存在两遍，还得再补一个 `add --draft` 才能串起来。命令本身就是产物：`/custom-tools add <整份 JSON>`，`add` 吃的是整行剩余文本，不需要引号转义，粘贴的字节和校验过的字节一致。判断标准：**能在一步里完成的门控，不要拆成两步再想办法把两步接起来。**
+
+### 给模型的管理面必须自带字段词汇表
+
+实测（盲测，只给 propose 的 description）：模型编出了 `execution: { type:'bash', command:"rg … '{{pattern}}'" }`——**插值**，正是本插件禁止的形态；`parameters` 写成 JSON Schema。而当时的校验器**静默忽略**未知键，模型只看到四条互不相干、都没说清正确写法的报错。
+
+现在三处兜住：`custom_tools_schema` 返回字段表 + 每模式一份**能过校验**的样例（`test/schema-tool.test.js` 用 `validateTool` 跑一遍，样例不许烂）；校验器对未知键报 `UNKNOWN_KEY` 并列出可用字段（带 Levenshtein 猜测）；`parameters` 像 JSON Schema 时只报一条 `PARAMETERS_IS_SCHEMA` 并给出正确形状，不再刷四条噪音。
+
+字段表要覆盖到**第二层**。第二轮盲测里模型已经知道 `parameters` 是映射，却在数组参数上写了 `items: { "type": "string" }`——因为参数规格内部的键名当时没列。所以 `custom_tools_schema` 现在单独有一节「parameters 里每个参数的字段」，并写明 `items` 是裸类型名、`default` 是 JSON 文本。
+
+**报错必须给出可直接抄的写法。** 同一轮盲测还暴露两个"能过校验但运行时才炸/根本不动"的坑：`default: 20`（裸数字）校验通过，调用时才报「参数 count 必须是数字」；`"items": { "type": "string" }` 只说「只能是标量类型」。现在前者报 `PARAMETER_DEFAULT_TEXT` 并打印 `应写成 "20"`，后者打印「写成 `"items": "string"`；不能写成 `{ "type": "string" }`」，`PARAMETER_DEFAULT_JSON` 打印「字符串写成 `"\".\""`」。判断标准：一条报错如果没让模型知道**下一句该写什么**，它就只是噪音。
 
 ### 保存时用 pieces 重建 args/parameters，别直接写回文档
 
@@ -410,6 +435,7 @@ Cordis 把 `apply` 的返回值当 effect 校验；返回 `{...}` 直接 `Invali
 11. 参数类型只有 `string|number|integer|boolean|array`，没有 `object`；`env` 不支持引用其他环境变量或 `DSH_*`。
 12. 没有后台/长任务（jobs）能力，长命令会占用一轮对话（v1 有意砍掉）。
 13. 无 CI、无 lint、无类型检查（纯 JSDoc）；`test-support/` 的宿主替身是手写复刻，宿主升级时**最容易漂移**的地方。
+14. `/custom-tools add <JSON>` 靠人粘一整行 JSON，长定义在输入框里不便核对——`custom_tools_propose` 会把同一份 JSON 缩进打印一遍供人核对，但"人能读懂多长的 JSON"是这套设计的天花板。
 
 ### 升级 DSH 时要重点复验的契约
 
@@ -438,10 +464,10 @@ Cordis 把 `apply` 的返回值当 effect 校验；返回 `{...}` 直接 `Invali
 
 ```bash
 cd /c/Users/mark/Desktop/dsh-custom-tools
-git status --short          # 应该是干净
-git log --oneline -1        # 65c5774
+git status --short          # 应该只剩预期改动
+git log --oneline -1
 node --check client.js
-node --test                 # 76 pass
+node --test                 # 94 pass
 ```
 
 然后：

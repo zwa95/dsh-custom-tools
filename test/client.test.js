@@ -581,7 +581,7 @@ test('the preview draws exactly one box per argv element', async () => {
   }
 })
 
-test('a repeated value is one box plus an ellipsis box', () => {
+test('an array is one slot, not a slot plus a repeat marker', () => {
   const internals = clientInternals()
   const spec = {
     name: 'repeated',
@@ -592,13 +592,15 @@ test('a repeated value is one box plus an ellipsis box', () => {
     parameters: { paths: { type: 'array', items: 'string', required: true } },
   }
 
-  // One value can become any number of argv elements, and the strip draws no
-  // values at all, so it says "one or more" instead of pretending to know.
+  // An array is a variable like any other: its values land in one slot, and how
+  // many argv elements that becomes is decided at call time. A second, ghosted
+  // box said "repeat" but read as "two parameters".
   const preview = internals.previewOf(spec, internals.piecesOf(spec))
   assert.equal(
-    Array.from(preview.argv, (item) => (item.absent === true ? 'ghost' : item.kind)).join(','),
-    'prog,variable,ghost',
+    Array.from(preview.argv, (item) => item.kind).join(','),
+    'prog,variable',
   )
+  assert.equal(preview.argv[1].text, '<paths>')
 })
 
 test('the preview shows which variables a stdin JSON object would carry', () => {

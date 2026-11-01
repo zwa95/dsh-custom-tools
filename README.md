@@ -241,6 +241,32 @@ validates and compiles all of them, so they cannot drift from the real schema.
 `preview` is the fastest way to find out why a tool isn't doing what you meant: it shows the exact
 argv the model's arguments would produce.
 
+## Agent-authored definitions
+
+Two tools exist for the case where the agent itself is asked to build a tool. Neither of them can
+change configuration.
+
+| tool | what it does |
+| --- | --- |
+| `custom_tools_schema` | Read-only. Returns the field vocabulary, one complete example per mode, and the user's current tools. |
+| `custom_tools_propose` | Validates a definition and returns one line: `/custom-tools add <JSON>`. Writes nothing — no config, no files. |
+
+The command *is* the product. `/custom-tools add` takes the whole remainder of the input, so the
+definition travels inside it with no quoting and no escaping, and what the user pastes is exactly
+what was validated. Running that line is the single human gate.
+
+A draft directory would have bought nothing: the definition would exist twice, and the copy would
+still need a human to read it. Registering tools straight from a model turn would void the whole
+guarantee — a model could declare `bash -c <anything>` and then call what it just built. One gate,
+at the step that actually writes the profile, is the entire design.
+
+`custom_tools_schema` carries the field names for a reason. Measured: given only the prose of
+`custom_tools_propose`, a model with no repository context produced a definition with an invented
+`execution` block that interpolated `{{pattern}}` into a shell command, and wrote `parameters` as a
+JSON Schema. Both failure modes now get a message that names the problem and the valid shape —
+`UNKNOWN_KEY` lists the real field names, and a JSON-Schema-shaped `parameters` produces a single
+`PARAMETERS_IS_SCHEMA` explanation instead of four unrelated complaints.
+
 ## Failure codes
 
 `INVALID_CONFIG`, `INVALID_ARGUMENT`, `TOOL_RELOADING`, `CREDENTIAL_UNAVAILABLE`,
@@ -254,9 +280,12 @@ Text is UTF-8 in both directions; Python and Java get their usual encoding defau
 
 ## Scope of v1
 
-Not included, on purpose: background jobs, preset-scoped tools, agent-authored drafts, disk-backed
-call history, output spill files, and any sandbox of its own. `OUTPUT_LIMIT` fails loudly instead of
-handing back a partial result.
+Not included, on purpose: background jobs, preset-scoped tools, disk-backed call history, output
+spill files, and any sandbox of its own. `OUTPUT_LIMIT` fails loudly instead of handing back a
+partial result.
+
+Proposed definitions are not stored anywhere: the model returns one command, and the user decides
+whether to run it. Nothing on disk changes until they do.
 
 ## Development
 
