@@ -69,7 +69,7 @@ index.js                 组合根：读 volatile config → Manager → 注册 
 client.js                浏览器半边（单文件，2176 行）：设置页 settings.section
 cordis.patch.yml         本插件的 bundle patch：一条 bare row `id: custom-tools`
 package.json             peer+dev 依赖、exports、dsh.bundle.patch、dsh.client.inject
-icon.svg / locale/*.json 图标与 meta 文案（i18n 只有标题/描述）
+icon.png / locale/*.json 图标与 meta 文案（i18n 只有标题/描述）
 
 src/config/schema.js     Schemastery 适配层（唯一的 schema 声明处）
 src/config/validate.js   纯跨字段校验（保存期/编译期用，返回带 path 的 issues）
@@ -344,6 +344,12 @@ DSH 的 Web UI 走 `127.0.0.1:54438` 且要 token（401），但**桌面窗口�
 ---
 
 ## 8. 决策日志（踩过的坑，别再踩）
+
+### 插件图标要写在 `package.json` 顶层，不是只写 `exports["./icon"]`
+
+0.1.0/0.1.1 只声明了 `exports["./icon"]: "./icon.png"`，装出来在「插件」页显示的是宿主默认的蓝色字形。宿主 `readPluginMeta(specifier, parentURL)` 里的 `iconOf()` 先看 `manifest.icon`（顶层字段，按 package.json 所在目录解析相对路径，**不经过模块解析器**），只有顶层字段缺失才回落到 `optionalResourcePath(\`${specifier}/icon\`)`。同门三个插件（better-sidebar、archive-manager、dsh-ops）都写了顶层 `icon`——这才是实际生效的那条路。补上 `"icon": "./icon.png"` 后重启应用，图标立刻正确；`exports["./icon"]` 保留作后备。
+
+顺带：图标文件支持 SVG / PNG / JPEG / WebP，上限 256 KiB，必须在包内；宿主按 `<img>` 渲染，所以 SVG 里的 `currentColor` 不生效——原来那份 24×24 线稿因此深色主题下几乎看不见。
 
 ### 别在 human gate 前面再加一道门
 
