@@ -39,7 +39,7 @@
     ".": "./index.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg",
+    "./icon": "./icon.png",
     "./package.json": "./package.json"
   },
   "files": [
@@ -47,7 +47,7 @@
     "client.js",
     "src",
     "locale",
-    "icon.svg",
+    "icon.png",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
