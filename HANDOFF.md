@@ -10,13 +10,13 @@
 
 | 项 | 值 |
 | --- | --- |
-| 仓库 | `C:\Users\mark\Desktop\dsh-custom-tools`（Git，`main`，无未提交改动） |
-| 最新提交 | `65c5774 fix(client): unwrap describe() and write through the resolved namespace` |
-| 规模 | `index.js` 120 行 + `client.js` 2176 行 + `src/**` 约 2900 行；测试 76 项全绿 |
+| 仓库 | `C:\Users\mark\Desktop\dsh-custom-tools`（Git，`main`） |
+| 最新提交 | `3622823 docs: add a handoff snapshot and drop the last sandbox wording from the docs`；此后工作树有一笔未提交改动：`client.js` 改用宿主组件库重画设置页 + `package.json` 补 peer |
+| 规模 | `index.js` 120 行 + `client.js` 约 2360 行 + `src/**` 约 2900 行；测试 76 项全绿 |
 | 宿主基线 | DSH `0.2.1-rc.3`、`@deepseek-ai/cordis` `4.0.5`、`@deepseek-ai/dsh-tools` `0.2.1-rc.3`、`@deepseek-ai/schemastery` `3.18.5`、本机 Node `v24.15.0` |
 | 安装形态 | `link:C:/Users/mark/Desktop/dsh-custom-tools`，装在 `~/.dsh/profiles/desktop`（应用 `plugin_manager` 装过，现在靠 link 生效） |
 | 用户现场 | 4 个可用工具：`python_pretty_json`（script）、`bash_grep`（bash）、`pwsh_recent_files`（powershell）、`rg_search`（executable） |
-| 当前唯一未确认项 | 设置页在真机上是否能正常列出这 4 个工具（client 侧 namespace 解包刚修完，等刷新验收） |
+| 设置页验收 | **已通过**（真机截图逐项核对，见 §7.1）：4 张卡片、开关、模式切换、下拉浮层、保存/放弃、红字删除都正常 |
 
 **这个插件的定位**（用户定的）：不是"把 agent 放出去"，而是"把用户的工具**收窄**成一条确定命令行"。模型只能影响声明过的 argv/stdin/env **值**，永远无法影响程序、脚本、命令文本、cwd、env 键名、凭据引用。
 
@@ -53,7 +53,8 @@ node research/tools/roundtrip-live.mjs <path-to-js-yaml.mjs>
 | 改了什么 | 怎么生效 |
 | --- | --- |
 | 用户工具定义（`~/.dsh/profiles/desktop/cordis.patch.yml` 里的 `config.tools`） | **几秒内自动生效**（`dsh-hmr` 监听 patch 文件 → `loader/volatile-update` → `Manager.apply`），不用重启 |
-| 本插件**模块代码**（`index.js` / `src/**` / `client.js`） | **必须重启 DSH 应用**。`link:` 包按 realpath 走 Node `ModuleLoader.loadCache`，同一个 URL 不会重新求值；`plugin_manager` 的 disable/enable 也不行 |
+| 本插件**模块代码**（`index.js` / `src/**`） | **必须重启 DSH 应用**。`link:` 包按 realpath 走 Node `ModuleLoader.loadCache`，同一个 URL 不会重新求值；`plugin_manager` 的 disable/enable 也不行 |
+| `client.js` | **不用重启**：客户端插件带 HMR 接收器，存盘后设置页当场重挂（实测，见 §7.2）。真不生效时再刷新页面 |
 | 只是刷新浏览器页面 | 只会重载 Client 半边（`client.js`），Host 不变 |
 
 Agent 自己**不能**刷新 Host（`unlag_refresh` 会返回"在右键菜单里打开 Agent 可以自己刷新"），所以要提醒用户重启或刷新。
@@ -281,9 +282,66 @@ powershell   [exe, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', comma
 - 页面自诊断 `collectIssues` 镜像 `src/config/validate.js`；未编辑的字段（`min`/`max`/`minLength`/`maxLength`）经 `parameterOf` 原样保留；孤儿参数（没有绑定的）以 `orphan` 片段保留，保存时不会静默丢弃。
 - 改草稿用稳定 `rowIds` 做 React key（否则改名会重挂卡片、打断输入）；`JsonField` 按**序列化内容**比较，不能按对象身份比较。
 
+### 7.1 控件层用宿主组件库
+
+设置页所有控件（按钮、开关、复选、下拉、分段、标签、折叠箭头、方形工具钮）都换成 DSH 自己的
+`@deepseek-ai/dsh-client-ui-primitives`，外观与宿主设置页一致；拿不到时逐个回落到原先手写的实现。
+
+- 接入点：`client.js` 里 `const H = (() => { try { return require('@deepseek-ai/dsh-client-ui-primitives') } catch (error) { ... return null } })()`，再经 `host(name)` 按名取组件。适配层是 `Chip` / `Button` / `TextInput` / `NumberInput` / `Select` / `Switch` / `Checkbox` / `Segmented` / `twistIcon` / `iconButton`。
+- **它不是 npm 包**：磁盘上没有这个目录，是 shell 通过 `window.__ModuleLoader__` 预置的静态模块（`dsh-web-frontend/dist/assets/index-*.js` 里 `staticModules` 的 11 个条目之一），所以 `package.json` 只能把它记成 optional peer，装不上也不该装。
+- 官方指南（`guide/plugin-dev-guide.md:332`）明文劝插件别 require 它：API 无预警变化，抛错的组件会把整个 `settings.section` 抹白。这里接受这个风险，代价与防线都写进 README 的「Controls」。
+- 两处**故意**不换：`<textarea>`（宿主没有多行输入，`InlineEditor` 回车即提交，与"显式保存"打架）；argv 预览的配色图例（宿主没有"这格是字面值/那格是变量"的语义色）。
+- 尺寸坑：宿主 `Button` 的 `size:'sm'` 是 28px 高、左右各 10px 内边距的药丸，单独一个图标会被拉成扁矩形，所以方形按钮显式给 `{ width: 28, height: 28, padding: 0 }`；`variant:'ghost'` 无描边，只用于方形图标钮，文字按钮一律 `outline`（否则读起来像标签而不是控件）。
+- 宿主没有 danger variant：`kind:'danger'` 用 `outline` + `color: var(--dsw-alias-*state-error-primary*)` 表达。
+- 卡片级的「复制 / 上移 / 下移 / 删除」不在卡片正文里，收进卡片头右侧的 ⋯（`CardMenu` = `iconButton(IconEllipsisOutlineRegular)` + 宿主 `Menu`，`portal` + `align:'end'`）。三个注意点：`Menu` 只负责渲染，**开合状态由 `anchor` 自己的 onClick 管**；`onSelect` 收到的是 `item.id`，选中后要自己 `onClose`；分隔项 `{ id: '', type: 'separator' }` 的 id 会作为该 div 的唯一子节点渲染，给空串才不会画出文字（`.separator` 是 `height:.5px`，文字会溢出来）。
+
+### 7.2 真机自检怎么做的（没有 DevTools 也能看）
+
+DSH 的 Web UI 走 `127.0.0.1:54438` 且要 token（401），但**桌面窗口可以截图和点击**：PowerShell + `Add-Type`
+声明 `user32` 的 `GetClientRect` / `ClientToScreen` / `CopyFromScreen` 截客户区，`SetCursorPos` +
+`mouse_event` 点击，`SendKeys` 打字，`mouse_event(0x0800)` 滚轮。截图 2560×1392。
+
+- 设置入口：窗口左下角**头像** `(30,1374)` → 菜单「设置」`(48,1239)`；弹窗左侧导航「自定义工具」`(976,730)`。（`Ctrl+,` 用 SendKeys 发不进去，走菜单可以。）
+- 关键发现：**只改 `client.js` 不需要重启应用**，客户端插件会自动热重载、设置页当场换新实现（与 §1 表格里"必须重启"的说法不符，那条只对 `index.js`/`src/**` 成立）。
+- 验收过的状态：4 张卡片 + 标签 + 开关；模式分段控件；工具条 保存/放弃修改/重新读取/新增四种；审批/并发/输出解析下拉浮层（portal 到 body、当前项带对勾）；工作目录分段；UTF-8 复选；命令片段的折叠/上移/下移/删除图标钮；`保存` 在**有改动**时是白底深字的 primary、**无改动**时是降透明度的禁用态（宿主约定）。改完用「放弃修改」回滚，`git status` 仍只有 `client.js`。
+
+### 7.3 文案与 Info 的写法（改文案前先读这条）
+
+页面上的解释分两层，别再把它写成一段段灰字：
+
+- **标签 + ⓘ**：凡是"这句话是给谁看的、为什么这么填"的解释，一律走 `Info`（宿主 `Tooltip` +
+  `IconQuestionOutlineRegular`，`maxWidth: 320`；宿主缺失时降级成原生 `title`）。`Field` 新增 `info`
+  入参，ⓘ 跟在标签后面，不占正文。
+- **hint**：只留单位和区间这类一眼要看到的（`1000 – 600000`）。超过一行的说明就不是 hint 了。
+- **句式**：陈述事实，不劝、不解释动机、不用"请注意/简单来说/只需要"。例：「模型只能提供参数值；程序、命令文本、工作目录与环境变量名都来自定义」。禁用「一键/轻松/强大/丝滑」这类空词。
+- 文案是**给模型看的产品面**：`description`/参数 `description` 会进模型上下文，写清用途与取值边界，不写实现细节。
+
+两条样式坑（改 `S` 前必读）：
+
+- 宿主 `Input` 在 grid 列里**不会自动收缩**：`minWidth: 0` 只解开 grid item 的 `min-width: auto` 下限，`<input>` 仍是 `width: auto`（固有宽度约 20 字符），必须**同时**给 `width: '100%'`，否则输入框会溢出到相邻列、两个字段的框直接压在一起。
+- 宿主输入框/按钮是**透明底 + 0.5px 描边**，不是填充块；`<textarea>` 也要设 `background: 'transparent'` + `border: 0.5px solid var(--dsw-alias-border-l3)` 才和它们同一套视觉。JSON 类文本域用 `S.areaMono`（等宽），散文类（描述、何时使用）用 `S.area`（继承正文字体）。
+
+字段行用几列的网格：字段数固定才用 `S.grid2` / `S.grid3`；"有时 2 个、有时 3 个"的行（前缀/后缀/分隔符、数组输出）用 `S.gridFit`（`repeat(auto-fit, minmax(150px, 1fr))`），字段几个就平分几份。
+
+### 7.4 数组参数在页面上的形态
+
+数组只有三种真实用法，页面上就只给三个出口：
+
+| 用法 | 页面控件 | 写出的绑定 |
+| --- | --- | --- |
+| `rg -g a -g b`、`git add a b c`（重复选项 / 位置参数逐值一格） | 「数组输出：每值一格」（**切到 array 类型时的默认**） | `repeat: true`，每个元素一个 argv，前缀/后缀逐元素加 |
+| `--fields a,b,c`（整组进一个 argv） | 「数组输出：合并为一格」+ 可选「分隔符」 | `join: '<分隔符>'`；分隔符留空 = 引擎的默认空格连接 |
+| 工具要一段原始 JSON 文本 | 「参数形态 → 按 JSON 输出」 | `json: true` |
+
+引擎默认（`src/compiler/bindings.js:47-70` `emitArray`）是"没设 `repeat` 就整组合并、`join` 未定义时用空格"。所以：**把类型切到 array 时页面会自动写上 `repeat: true`**（用户的一次点击，不是偷偷改存档），已有的定义保持原样不动；分隔符输入框只在「合并为一格」时出现，留空显示占位「空格」，不编造逗号。
+
 ---
 
 ## 8. 决策日志（踩过的坑，别再踩）
+
+### 保存时用 pieces 重建 args/parameters，别直接写回文档
+
+`settings.get` 返回的文档是**schema 归一化过的**：用户没写过的可选布尔会以 `repeat: false` / `json: false` / `required: false` 的形态出现。早期 `save` 直接把 `config.tools` 写回去，结果一次保存就把整份 `cordis.patch.yml` 灌满默认值（还顺带把 `script: 'C:\...'` 的单引号和 `default: 'false'` 的引号洗掉）。现在 `save` 先 `config.tools.map((tool) => applyPieces(tool, piecesOf(tool)))`，只写出有意义的键。判断标准很简单：**页面必须能把"用户没碰过的定义"原样存回去**，归一化是宿主的事，不该被 UI 固化进文件。改完用 `node research/tools/roundtrip-live.mjs` 验证四份真实定义仍能字节级往返。
 
 ### 为什么执行沙箱被整个移除
 
@@ -321,6 +379,9 @@ Cordis 把 `apply` 的返回值当 effect 校验；返回 `{...}` 直接 `Invali
 - 数组参数必须带 `items`；`oneOf` 不能与 `type` 同层；object 必须显式 `additionalProperties`。
 - 跨 VM realm 用 `assert.deepEqual` 比较数组会失败（同结构不同原型），改 `Array.from(...)` 或字符串比较。
 - ops_bash 的 command 走 JSON 解码，`\\` 会被压成 `\`；写脚本/路径时优先用正斜杠或用 python 脚本传 `sys.argv`。
+- **状态型控件不要拿"当前值"当切换判据**：工作目录的分段控件原来写 `set({ cwd: next === 'session' ? undefined : (asString(tool.cwd) || '/') })`，而工具里存的是 `cwd: '.'`——切到「指定路径」时算出来的还是 `'.'`，`set` 等于空写，卡片不 dirty、分段点不动，看起来就是"按钮点不了"。改法：切到 custom 时如果现值不是"自定义路径"就写一个占位绝对路径（`'/'`，进输入框即选中，直接输就替换）。同理，`customCwd` 这种派生布尔值只用来**显示**，不要用来决定**写入什么**。
+- **宿主 `Input` 放进 grid 列必须给 `width: '100%'`**：`minWidth: 0` 只解开 grid item 的 `min-width: auto` 下限，`<input>` 仍是 `width: auto`，会保持约 20 字符的固有宽度、画到相邻列上（症状是两个字段的输入框互相压住）。两个都要加，见 `monoStyle` / `plainInputStyle`。
+- **前缀/后缀这种"有时 2 个、有时 3 个"的字段行不要用固定三列网格**：`S.grid3` 把 2 个字段挤进前两个 1fr 窄列，右侧留白又难看。改用 `S.gridFit`（`repeat(auto-fit, minmax(150px, 1fr))`），字段几个就平分几份。
 
 ---
 
@@ -328,7 +389,7 @@ Cordis 把 `apply` 的返回值当 effect 校验；返回 `{...}` 直接 `Invali
 
 ### P0 — 先确认可用
 
-1. **设置页真机验收**：`65c5774` 修了 `describe()` 解包，但用户还没在新版本上点开过。刷新应用窗口 → 设置 → 自定义工具，应看到 `revision N` 与四张卡片；若仍是红字，把新的报错文案发回来。
+1. ~~**设置页真机验收**~~：**已通过**。`65c5774` 修了 `describe()` 解包后，真机上能看到 `revision N` 与四张卡片，控件层也已换成宿主组件库并通过逐项截图核对（§7.1 / §7.2）。原先"开关白底白钮、保存白底白字"的配色 bug 也随之消失——宿主 `Switch`/`Button` 自带对的配色，`C.brand` 那套自绘 token 只剩少量兜底在用。
 2. `rg_search` 无命中时返回 `[PROCESS_EXIT] 退出码 1`（ripgrep 用 1 表示"没找到"）。产品决策未定：
    - 保持现状（语义干净，模型能看出"没匹配"），或
    - 改成 bash 包装（`rg … ; s=$?; [ $s -le 1 ] && exit 0; exit $s`）——没匹配即成功，但工具不再是 executable 模式。
@@ -369,6 +430,7 @@ Cordis 把 `apply` 的返回值当 effect 校验；返回 `{...}` 直接 `Invali
 5. **不要用 `ctx.shell`**：它只收 `command: string`，用它就意味着插值。
 6. **唯一成功码是 0**，不做可配置白名单。
 7. 结果正文里不出现 argv / cwd / duration / sandbox 细节。
+8. **宿主 UI 组件只能从 `host(name)` 拿**，不许在别处散着 `require('@deepseek-ai/dsh-client-ui-primitives')`；每个控件必须保留非宿主分支，因为那个模块可能不存在、也可能在升级后改签名（§7.1）。
 
 ---
 

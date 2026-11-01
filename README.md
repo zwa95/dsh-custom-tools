@@ -92,6 +92,63 @@ untouched: opening a card and saving must never rewrite a definition you did not
 The page cannot run anything. A browser has no channel to the host process, so `preview` and
 `test` stay in the session as `/custom-tools` subcommands.
 
+### Controls
+
+The page draws its controls with the host's own component kit
+(`@deepseek-ai/dsh-client-ui-primitives`), so a button, switch, checkbox, dropdown or chip looks
+and behaves like the one on DSH's own settings pages instead of being a look-alike. The kit is
+reached through one guarded `require` and an adapter layer (`Chip`, `Button`, `TextInput`,
+`Select`, `Switch`, `Checkbox`, `Segmented`, `twistIcon`, `iconButton`), and every one of them
+falls back to the plain implementation written earlier when the module is missing:
+
+- The kit is **not** a published package. It is a module the shell pre-registers with the client
+  `ModuleLoader`, so it resolves at runtime and cannot be installed.
+- Its API is explicitly not a contract — the official plugin guide tells plugins not to require
+  it, because a change lands without notice and a throwing component blanks the whole
+  `settings.section` entry. That risk is accepted here: the require is wrapped in `try`, the
+  adapter looks components up by name, and each control keeps a non-kit branch.
+- Two things stay hand-drawn on purpose: the `<textarea>` (the kit has no multi-line input; its
+  inline editor commits on Enter, which fights an explicit Save button) and the argv preview
+  legend colours (the kit has no semantic equivalent for "this box is a literal, that one is a
+  variable").
+
+### Field copy
+
+Explanations live behind a ⓘ rather than under every control: `Field` takes an `info` string that
+renders a `Tooltip` on a question mark next to the label. A `hint` is kept only for the short
+things that must stay visible while typing, such as `1000 – 600000`. The prose states what a field
+does and who reads it — `description` and each parameter's `description` are what the model sees —
+without hedging, filler or motivational phrasing.
+
+Two layout rules follow from the kit's own styling and are easy to regress:
+
+- A host `Input` inside a grid column keeps its intrinsic width (~20 characters) unless given both
+  `minWidth: 0` and `width: 100%`. `minWidth` only lifts the grid item's automatic minimum; without
+  the width the field still paints over its neighbour.
+- Host inputs are transparent with a hairline border, not filled blocks; textareas match them
+  (`background: transparent`, `border: 0.5px solid var(--dsw-alias-border-l3)`), with monospace
+  reserved for JSON and shell text.
+
+Rows whose field count varies (prefix/suffix plus an optional separator, the array controls) use
+`S.gridFit` — `repeat(auto-fit, minmax(150px, 1fr))` — so two fields split the row in half instead of
+being squeezed into a three-column preset.
+
+### Array parameters
+
+Three shapes cover the CLIs this plugin targets, and the page offers exactly those:
+
+| Shape | Control | Binding written |
+| --- | --- | --- |
+| `rg -g a -g b`, `git add a b c` — one argv per value | **One per value** (default when the type becomes `array`) | `repeat: true`; prefix and suffix apply per element |
+| `--fields a,b,c` — the whole list in one argv | **Join into one** plus an optional separator | `join: '<separator>'`; an empty separator keeps the engine's space-joined default |
+| A tool that wants raw JSON text | Format → **Emit as JSON** | `json: true` |
+
+The engine's own default is the surprising one: without `repeat` the list is joined into a *single*
+argv, with a space when `join` is undefined. Switching a parameter's type to `array` therefore writes
+`repeat: true` in the same edit — a user action, never a silent rewrite of an existing definition — and
+the separator field appears only for the joined shape.
+
+
 ## Shell binaries on Windows
 
 `mode: bash` and `mode: powershell` start a shell. Both default to the name on
