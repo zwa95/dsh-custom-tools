@@ -5,8 +5,35 @@
   "type": "module",
   "main": "index.js",
   "license": "MIT",
+  "author": "zwa95",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zwa95/dsh-custom-tools.git"
+  },
+  "homepage": "https://github.com/zwa95/dsh-custom-tools#readme",
+  "bugs": {
+    "url": "https://github.com/zwa95/dsh-custom-tools/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "tool",
+    "argv",
+    "cli",
+    "settings-ui",
+    "nodejs",
+    "esm"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "packageManager": "pnpm@11.22.0",
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.1-rc.3"
   },
   "exports": {
     ".": "./index.js",
@@ -22,16 +49,19 @@
     "locale",
     "icon.svg",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "pack:check": "npm pack --dry-run",
+    "prepublishOnly": "node --check client.js && node --test"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.5",
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.2.1-rc.1",
-    "@deepseek-ai/dsh-tools": "^0.2.1-rc.1",
-    "@deepseek-ai/schemastery": "~3.18.5"
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.1-rc.1 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.1 <0.3.0",
+    "@deepseek-ai/schemastery": "^3.18.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
