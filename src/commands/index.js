@@ -18,7 +18,7 @@ const HELP = [
   '  list                       列出已声明的工具（含启用状态与注册状态）',
   '  status                     当前代际、诊断与最近一次提交时间',
   '  show <name>                打印某个工具的完整定义（JSON）',
-  '  preview <name> [json]      展示将要执行的 argv/cwd/env 键/沙箱档位，不启动进程',
+  '  preview <name> [json]      展示将要执行的 argv/cwd/env 键，不启动进程',
   '  test <name> [json]         真实执行一次（与模型调用同一条流水线）',
   '  enable <name>              启用一个工具',
   '  disable <name>             禁用一个工具（在途调用会被取消）',

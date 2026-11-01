@@ -19,20 +19,20 @@
 /custom-tools test git_status
 ```
 
-`preview` 不启动进程，只打印逐元素 argv、cwd、环境变量键名和三档沙箱；`test` 与模型调用走**同一条流水线**，因此它成功不代表模型一定能调——两者的差别只有审批与调用方。
+`preview` 不启动进程，只打印逐元素 argv、cwd 与环境变量键名；`test` 与模型调用走**同一条流水线**，因此它成功不代表模型一定能调——两者的差别只有审批与调用方。
 
 ## 清单
 
 | 文件 | mode | 演示什么 |
 | --- | --- | --- |
 | [`git-status.json`](git-status.json) | executable | 最小可用定义：固定程序 + 固定参数，只读、可并发 |
-| [`ripgrep-search.json`](ripgrep-search.json) | executable | 参数 → argv 元素、`omitIfEmpty`、`read-only` 沙箱、legacy `examples` |
+| [`ripgrep-search.json`](ripgrep-search.json) | executable | 参数 → argv 元素、`omitIfEmpty`、只读搜索、legacy `examples` |
 | [`node-script.json`](node-script.json) | script | 固定解释器 + 固定脚本路径，模型只能填参数值 |
-| [`pwsh-disk-report.json`](pwsh-disk-report.json) | powershell | 固定命令文本，模型值只进 `$args`，不做字符串拼接 |
+| [`pwsh-disk-report.json`](pwsh-disk-report.json) | powershell | 固定命令文本，模型值只经 stdin JSON 进入，不做字符串拼接 |
 | [`project-metadata.json`](project-metadata.json) | executable | `parse: "json"` + 输出 schema 校验 |
 
 ## 三条容易踩的线
 
 1. **模型的值永远不会被拼进 shell 源码。** bash/powershell 两种模式的命令文本完全由作者固定；模型值要么是独立 argv 元素（bash 走 `$@`，pwsh 走 `$args`），要么是 stdin 字节。
-2. **沙箱只能收紧。** 工具写 `workspace-write` 而会话是 `read-only`，实际生效 `read-only`；反过来不会放宽。沙箱服务缺失时直接失败，不会裸跑。
+2. **工具以宿主权限运行。** 插件没有 confinement 层：写定义的人就为它的读写行为负责。想让某个工具只读，靠的是命令本身（例如 `rg_search` 只读），不是靠声明。
 3. **以 `-` 或 `@` 开头的值默认被拒绝。** 这是防止模型传一个 `--output=/etc/passwd` 变成参数注入；确实需要时在对应的 binding 上写 `allowLeadingDash` / `allowResponseFile`，并清楚为什么。

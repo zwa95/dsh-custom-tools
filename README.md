@@ -13,6 +13,9 @@ Tools run with the privileges of the harness itself. There is no confinement lay
 local programs expect to read their own config and write their own caches, and reshaping them to
 fit a sandbox is not what this plugin is for. You write the definition, so you own the behaviour.
 
+> Working on the plugin itself? [`HANDOFF.md`](HANDOFF.md) is the current state of the implementation:
+> architecture, config contract, the decision log behind the parts that look odd, and what is still open.
+
 ## What it guarantees
 
 | Concern | Behaviour |
