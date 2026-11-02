@@ -263,5 +263,40 @@ test('add validates the whole definition before writing it', async () => {
 
   const exported = await handler({ rawInput: 'export', signal: undefined })
   assert.equal(exported.kind, 'success')
-  assert.deepEqual(JSON.parse(exported.text), [])
+  // `export` writes the same bundle `add` and the settings page accept, so a
+  // pasted export is directly importable.
+  assert.deepEqual(JSON.parse(exported.text), { tools: [] })
+})
+
+test('a pasted export goes back in: same name replaces, new name appends', async () => {
+  const fake = fakeContext()
+  const writes = []
+  fake.ctx.settings = {
+    describe: () => [{ ns: 'custom-tools', revision: 3, value: { tools: [TOOL], deferLoading: false } }],
+    async mutate(ns, ops, revision) { writes.push({ ns, ops, revision }) },
+  }
+  apply(fake.ctx, { tools: ref([TOOL]), deferLoading: ref(false) })
+  await new Promise((resolve) => setImmediate(resolve))
+  const handler = fake.commands.get('custom-tools').handler
+
+  const exported = await handler({ rawInput: 'export', signal: undefined })
+  assert.equal(exported.kind, 'success')
+  assert.deepEqual(Object.keys(JSON.parse(exported.text)), ['tools'], 'a bundle, not a bare array')
+
+  const extra = { ...TOOL, name: 'demo_tool_2' }
+  const pasted = JSON.stringify({ tools: [TOOL, extra] })
+  const imported = await handler({ rawInput: `add ${pasted}`, signal: undefined })
+  assert.equal(imported.kind, 'success')
+  assert.match(imported.text, /已导入 2 个工具/u)
+  assert.match(imported.text, /新增 demo_tool_2/u)
+  assert.match(imported.text, /替换 demo_tool/u)
+  assert.equal(writes.length, 1, 'one mutate for the whole document')
+  assert.deepEqual(
+    writes[0].ops[0].value.map((entry) => entry.name),
+    ['demo_tool', 'demo_tool_2'],
+  )
+
+  const single = await handler({ rawInput: 'export demo_tool', signal: undefined })
+  assert.equal(single.kind, 'success')
+  assert.equal(JSON.parse(single.text).name, 'demo_tool', 'a named export is one definition')
 })

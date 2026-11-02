@@ -412,6 +412,13 @@ function validateMode(tool, path, issues) {
     // may be pointed at a specific installation when PATH has the wrong one.
     forbid('interpreter', `${mode} 模式下请用 executable 指定 shell，interpreter 不生效`)
     forbid('script', `${mode} 模式下 script 不生效`)
+    // `??` in the compiler only defaults an *absent* field: `executable: ''`
+    // would be executed as the empty name and fail at call time instead.
+    if (tool.executable !== undefined
+      && (typeof tool.executable !== 'string' || tool.executable.trim() === '')) {
+      issues.push(fail(tool.name, `${path}.executable`, 'MODE_FIELD_REQUIRED',
+        `executable 要么删掉（默认用 ${mode === 'bash' ? 'bash' : 'pwsh'}），要么写 shell 名或绝对路径；空字符串不是默认值`))
+    }
     if (mode === 'powershell') validatePowershellArgs(tool, path, issues)
   }
 

@@ -29,15 +29,50 @@ function fakeReact() {
   }
 }
 
-function loadBundle() {
+function loadBundle(globals = {}) {
   let captured
   const sandbox = {
     window: { __ModuleLoader__: { load: (spec) => { captured = spec } } },
     console,
+    ...globals,
   }
   vm.runInNewContext(source, sandbox, { filename: 'client.js' })
   assert.ok(captured, 'the bundle registers itself with the ModuleLoader')
   return captured
+}
+
+/**
+ * A slot registry shaped like the shipped one: `inject` runs the declaration
+ * callback immediately (a generator for list slots, a plain function for
+ * single/keyed slots) and `register` hands back a disposer. That is enough to
+ * exercise the dynamic rail entry, which is the only registration here that
+ * appears and disappears at runtime.
+ */
+function makeSlots() {
+  const calls = []
+  const registered = []
+  return {
+    calls,
+    registered,
+    inject(name, declaration) {
+      calls.push(name)
+      const value = declaration()
+      if (value !== undefined && value !== null && typeof value.next === 'function') {
+        for (let step = value.next(); !step.done; step = value.next()) {
+          // The yielded value is the disposer `register` already handed out.
+        }
+        return () => undefined
+      }
+      return typeof value === 'function' ? value : () => undefined
+    },
+    register(definition, component) {
+      registered.push({ definition, component })
+      return () => {
+        const index = registered.findIndex((entry) => entry.definition === definition)
+        if (index >= 0) registered.splice(index, 1)
+      }
+    },
+  }
 }
 
 test('the client registers under the package name', () => {
@@ -58,26 +93,13 @@ test('the client declares the remote settings service it reads', () => {
   assert.equal(typeof exportsObject.apply, 'function')
 })
 
-test('mounting registers exactly one settings section with a component', () => {
+test('mounting registers the settings section and the sidebar panel, never the icon by default', () => {
   const exportsObject = loadBundle().factory((name) => {
     if (name === 'react') return fakeReact()
     throw new Error(`unexpected require: ${name}`)
   })
 
-  const registered = []
-  const slots = {
-    inject(name, generator) {
-      assert.equal(name, 'settings.section')
-      const iterator = generator()
-      for (let step = iterator.next(); !step.done; step = iterator.next()) {
-        registered.push(step.value)
-      }
-    },
-    register(definition, component) {
-      return { definition, component }
-    },
-  }
-
+  const slots = makeSlots()
   const ctx = {
     slots,
     remote: { settings: { describe: async () => ({ ok: true, value: [] }), mutate: async () => ({ ok: true }) } },
@@ -88,12 +110,66 @@ test('mounting registers exactly one settings section with a component', () => {
 
   exportsObject.apply(ctx)
 
-  assert.equal(registered.length, 1, 'one section, not zero and not two')
-  const [{ definition, component }] = registered
-  assert.equal(definition.name, 'settings.section')
-  assert.equal(definition.id, 'custom-tools')
-  assert.equal(typeof definition.label, 'string')
-  assert.equal(typeof component, 'function', 'the section renders a component')
+  // Arrays built inside the VM carry that realm's prototype, so compare values.
+  assert.deepEqual(Array.from(slots.calls), ['settings.section', 'main', 'sidebar.panellist'])
+
+  const section = slots.registered.find((entry) => entry.definition.name === 'settings.section')
+  assert.ok(section, 'the settings section is registered')
+  assert.equal(section.definition.id, 'custom-tools')
+  assert.equal(typeof section.definition.label, 'string')
+  assert.equal(typeof section.component, 'function', 'the section renders a component')
+
+  const panel = slots.registered.find((entry) => entry.definition.name === 'main')
+  assert.ok(panel, 'the main panel exists so selectPanel("custom-tools") always resolves')
+  assert.equal(panel.definition.key, 'custom-tools')
+
+  assert.equal(
+    slots.registered.some((entry) => entry.definition.name === 'sidebar.panellist'),
+    false,
+    'the rail icon is off until the user asks for it',
+  )
+})
+
+test('the rail icon appears and disappears with the preference', () => {
+  const exportsObject = loadBundle().factory((name) => {
+    if (name === 'react') return fakeReact()
+    throw new Error(`unexpected require: ${name}`)
+  })
+
+  const slots = makeSlots()
+  const ctx = { slots, get: (service) => (service === 'slots' ? slots : undefined) }
+  exportsObject.apply(ctx)
+
+  const icon = () => slots.registered.find((entry) => entry.definition.name === 'sidebar.panellist')
+
+  exportsObject.__internal.writeSidebarPref(true)
+  assert.ok(icon(), 'turning the switch on registers the rail entry')
+  assert.equal(icon().definition.id, 'custom-tools', 'the icon id is the panel key')
+
+  exportsObject.__internal.writeSidebarPref(false)
+  assert.equal(icon(), undefined, 'turning it off removes the entry again')
+})
+
+test('the preference is remembered across mounts', () => {
+  const store = new Map()
+  const localStorage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)) },
+  }
+
+  const first = loadBundle({ localStorage }).factory((name) => {
+    if (name === 'react') return fakeReact()
+    throw new Error(`unexpected require: ${name}`)
+  })
+  assert.equal(first.__internal.readSidebarPref(), false, 'default is off')
+  first.__internal.writeSidebarPref(true)
+
+  // A reload builds a fresh bundle; the choice has to survive it.
+  const second = loadBundle({ localStorage }).factory((name) => {
+    if (name === 'react') return fakeReact()
+    throw new Error(`unexpected require: ${name}`)
+  })
+  assert.equal(second.__internal.readSidebarPref(), true)
 })
 
 test('an absent remote settings namespace does not stop the section mounting', () => {
@@ -102,20 +178,11 @@ test('an absent remote settings namespace does not stop the section mounting', (
     throw new Error(`unexpected require: ${name}`)
   })
 
-  let registered = 0
-  const slots = {
-    inject(_name, generator) {
-      const iterator = generator()
-      for (let step = iterator.next(); !step.done; step = iterator.next()) registered += 1
-    },
-    register() {
-      return {}
-    },
-  }
+  const slots = makeSlots()
   const ctx = { slots, get: (service) => (service === 'slots' ? slots : undefined) }
 
   assert.doesNotThrow(() => exportsObject.apply(ctx))
-  assert.equal(registered, 1)
+  assert.equal(slots.registered.length, 2, 'the section and the panel still mount')
 })
 
 test('the section reads remote settings through the soft get path', () => {
@@ -734,4 +801,65 @@ test('describe() is unwrapped before the namespace is looked up', () => {
   assert.equal(internals.findNamespace([view], 'custom-tools'), view)
   assert.equal(internals.findNamespace({ views: [view] }, 'custom-tools'), view)
   assert.equal(internals.findNamespace({ namespaces: [view] }, 'other'), null)
+})
+
+test('the page reads the same three document shapes the CLI accepts', () => {
+  const internals = clientInternals()
+  const tool = {
+    name: 'git_status',
+    description: 'x',
+    mode: 'executable',
+    executable: 'git',
+    args: [{ literal: 'status' }],
+  }
+
+  const one = internals.parseToolDocument(JSON.stringify(tool))
+  assert.equal(one.ok, true)
+  assert.deepEqual(Array.from(one.tools, (entry) => entry.name), ['git_status'])
+
+  const many = internals.parseToolDocument(JSON.stringify([tool, { ...tool, name: 'git_log' }]))
+  assert.deepEqual(Array.from(many.tools, (entry) => entry.name), ['git_status', 'git_log'])
+
+  // The bundle `export` writes must paste straight back in.
+  const bundle = internals.parseToolDocument(JSON.stringify({ tools: [tool], deferLoading: true }))
+  assert.equal(bundle.ok, true)
+  assert.equal(bundle.tools.length, 1)
+
+  // A fence copied out of a chat window is punctuation, not content.
+  const fenced = internals.parseToolDocument(`\`\`\`json\n${JSON.stringify({ tools: [tool] })}\n\`\`\``)
+  assert.equal(fenced.ok, true)
+  assert.equal(fenced.tools.length, 1)
+})
+
+test('a paste that is not a tool document says why', () => {
+  const internals = clientInternals()
+  assert.match(internals.parseToolDocument('').error, /内容为空/u)
+  assert.match(internals.parseToolDocument('{oops}').error, /不是合法 JSON/u)
+  assert.match(internals.parseToolDocument('{"hello":1}').error, /无法识别/u)
+  const repeated = internals.parseToolDocument(JSON.stringify([
+    { name: 'same', mode: 'executable', executable: 'git' },
+    { name: 'same', mode: 'executable', executable: 'git' },
+  ]))
+  assert.equal(repeated.ok, false)
+  assert.match(repeated.error, /两次/u)
+})
+
+test('an import plan separates new tools from overwritten ones', () => {
+  const internals = clientInternals()
+  const plan = internals.planImport(
+    [{ name: 'git_status' }, { name: 'rg_search' }],
+    [{ name: 'rg_search' }, { name: 'new_one' }],
+  )
+  assert.deepEqual(
+    plan.map((entry) => `${entry.name}:${entry.replacing}:${entry.index}`),
+    ['rg_search:true:1', 'new_one:false:-1'],
+  )
+})
+
+test('applying an import replaces in place and appends the rest', () => {
+  const internals = clientInternals()
+  const existing = [{ name: 'a', v: 1 }, { name: 'b', v: 2 }]
+  const next = internals.applyImport(existing, [{ name: 'b', v: 3 }, { name: 'c', v: 4 }])
+  assert.deepEqual(Array.from(next, (entry) => `${entry.name}=${entry.v}`), ['a=1', 'b=3', 'c=4'])
+  assert.equal(existing[1].v, 2, 'the draft being edited is not mutated in place')
 })

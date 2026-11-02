@@ -122,6 +122,23 @@ test('an array items written as a nested schema is rejected with the bare form',
   assert.match(issue.message, /"items": "string"/u)
 })
 
+test('a shell definition may set executable, but not to nothing', () => {
+  // `executable` on a bash/powershell tool is the shell binary, and an absent
+  // field means "the default bash/pwsh". An empty string is neither: downstream
+  // it is the program name, so it fails at call time instead of here.
+  const ok = validateTool(base({
+    mode: 'bash',
+    executable: 'C:/Program Files/Git/bin/bash.exe',
+    command: 'grep -rn -- "$@"',
+  }), 'tools[0]')
+  assert.deepEqual(ok.filter((entry) => entry.severity === 'error'), [])
+
+  const blank = validateTool(base({ mode: 'bash', executable: '', command: 'true' }), 'tools[0]')
+  const issue = blank.find((entry) => entry.code === 'MODE_FIELD_REQUIRED' && entry.path === 'tools[0].executable')
+  assert.ok(issue, 'an empty shell path is reported at the field')
+  assert.match(issue.message, /默认用 bash/u)
+})
+
 test('a valid definition produces no issues at all', () => {
   assert.deepEqual(validateTool(base(), 'tools[0]'), [])
 })

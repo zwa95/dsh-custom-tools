@@ -92,6 +92,31 @@ untouched: opening a card and saving must never rewrite a definition you did not
 The page cannot run anything. A browser has no channel to the host process, so `preview` and
 `test` stay in the session as `/custom-tools` subcommands.
 
+### JSON in and out
+
+A tool is made to be shared, so the page speaks the same document format as the commands:
+
+- The card's `⋯` menu has **导出 JSON** (a read-only box with a copy button) and **从 JSON 导入…**
+  (paste one definition to replace that card).
+- The toolbar has **＋ 新增**, one button with the four modes behind a menu, and **从 JSON 导入**
+  for a whole document — one tool, several, or an exported bundle.
+- Any import that would overwrite an existing tool asks first: a second dialog lists the names
+  that will be replaced. Import only edits the draft; nothing reaches the profile until **保存**.
+
+On the bash and powershell cards, **Bash 可执行文件** / **PowerShell 可执行文件** pins the shell
+binary (a name on `PATH` or an absolute path) for the case where `PATH` has the wrong one. Leave it
+blank for the default: `bash` (falling back to Git Bash/MSYS2 on Windows) or `pwsh` (falling back
+to Windows PowerShell 5.1).
+
+### A rail entry for the page
+
+The editor also exists as a full-width panel in the main column. **在侧边栏显示入口** at the bottom
+of the page puts a 自定义工具 row in the left rail (right below 插件市场) that opens it; the same
+checkbox removes it. The choice is per client and per machine — it lives in `localStorage`
+(`dsh-custom-tools:sidebar-entry`), not in the profile, so flipping it never bumps the settings
+revision and never interrupts a running tool. The panel is registered unconditionally: hiding the
+icon only takes away the button, so `selectPanel('custom-tools')` from anywhere still resolves.
+
 ### Controls
 
 The page draws its controls with the host's own component kit
@@ -229,9 +254,14 @@ starting with `-` or `@` are rejected unless the entry sets `allowLeadingDash` o
 /custom-tools preview <name> {"query":"dsh"}   # prints argv and cwd — runs nothing
 /custom-tools test <name> {"query":"dsh"}      # same pipeline as a model call
 /custom-tools enable|disable <name>
-/custom-tools add <json>                       # whole definition, validated before it is written
-/custom-tools export                           # every definition as JSON, ready to `add` back
+/custom-tools add <json>                       # one tool, an array, or {"tools":[...]}; validated first
+/custom-tools export                           # every definition as {"tools":[...]}, ready to paste back
+/custom-tools export <name>                    # one definition, same shape `show` prints
 ```
+
+Every surface that reads a tool document accepts the same three shapes: a single definition, an
+array of definitions, or the `{"tools": [...]}` bundle `export` writes. A fence copied from a chat
+message is stripped too, so a ` ```json ` block pastes in as-is.
 
 [folder `examples/`](examples/) ships five definitions you can paste straight into `add`: a fixed
 executable, an `rg` search with a parameter, a script with a fixed interpreter, a PowerShell snippet

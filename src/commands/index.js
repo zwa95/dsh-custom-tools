@@ -10,6 +10,7 @@
  * `test` call {@link Manager.preview} / {@link Manager.test}, which call the
  * same `runCustomTool` a model call reaches.
  */
+import { readToolDocument } from '../config/document.js'
 import { validateTool } from '../config/validate.js'
 
 const HELP = [
@@ -22,8 +23,9 @@ const HELP = [
   '  test <name> [json]         真实执行一次（与模型调用同一条流水线）',
   '  enable <name>              启用一个工具',
   '  disable <name>             禁用一个工具（在途调用会被取消）',
-  '  add <json>                 添加或替换一个工具（整份定义，先校验后写入）',
-  '  export                     导出当前全部工具定义（JSON，可直接再 add 回来）',
+  '  add <json>                 添加或替换工具：单个对象、对象数组，或 {"tools":[...]}',
+  '  export [name]              导出全部工具（{"tools":[...]}，可直接 paste 回 add/设置页）',
+  '                             带 name 时只导出那一个工具',
   '',
   '参数 [json] 是一个 JSON 对象，例如：{"query":"dsh","limit":5}',
 ].join('\n')
@@ -189,17 +191,20 @@ export function registerCommands(ctx, { manager, namespace }) {
    */
   const addTool = async (text) => {
     if (text === '') return err('用法：/custom-tools add <工具定义 JSON>')
-    let spec
+    let parsed
     try {
-      spec = JSON.parse(text)
+      parsed = JSON.parse(text)
     } catch (error) {
       return err(`不是合法 JSON：${error instanceof Error ? error.message : String(error)}`)
     }
-    if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) {
-      return err('工具定义必须是一个 JSON 对象')
-    }
+    const document = readToolDocument(parsed)
+    if (document.ok !== true) return err(document.message)
 
-    const issues = validateTool(spec, 'tool')
+    // One bad tool must not write the good ones either: validate the whole
+    // document first, then commit once.
+    const single = document.tools.length === 1
+    const issues = document.tools.flatMap((spec, index) =>
+      validateTool(spec, single ? 'tool' : `tools[${index}]`))
     if (issues.length > 0) {
       return err(`定义没有通过校验，未写入任何内容：\n${renderIssues(issues)}`)
     }
@@ -207,11 +212,19 @@ export function registerCommands(ctx, { manager, namespace }) {
     const doc = readDocument(ctx, namespace)
     if (doc.error) return err(doc.error)
 
-    const index = doc.tools.findIndex((tool) => tool?.name === spec.name)
-    const replacing = index !== -1
-    const tools = replacing
-      ? doc.tools.map((tool, position) => (position === index ? spec : tool))
-      : [...doc.tools, spec]
+    const tools = [...doc.tools]
+    const added = []
+    const replaced = []
+    for (const spec of document.tools) {
+      const index = tools.findIndex((tool) => tool?.name === spec.name)
+      if (index === -1) {
+        tools.push(spec)
+        added.push(spec.name)
+      } else {
+        tools[index] = spec
+        replaced.push(spec.name)
+      }
+    }
 
     try {
       await doc.settings.mutate(
@@ -222,13 +235,33 @@ export function registerCommands(ctx, { manager, namespace }) {
     } catch (error) {
       return err(`写入配置失败：${error instanceof Error ? error.message : String(error)}`)
     }
-    return ok(`已${replacing ? '替换' : '添加'} ${spec.name}。用 /custom-tools preview ${spec.name} 检查 argv。`)
+
+    const first = document.tools[0].name
+    const ignored = document.ignoredKeys.length > 0
+      ? `（${document.ignoredKeys.join('、')} 随整份配置走，不随工具导入）`
+      : ''
+    const headline = single
+      ? `已${replaced.length > 0 ? '替换' : '添加'} ${first}`
+      : `已导入 ${document.tools.length} 个工具：`
+        + [added.length > 0 ? `新增 ${added.join('、')}` : '',
+          replaced.length > 0 ? `替换 ${replaced.join('、')}` : ''].filter(Boolean).join('；')
+    return ok(`${headline}${ignored}。用 /custom-tools preview ${first} 检查 argv。`)
   }
 
-  const exportTools = () => {
+  const exportTools = (rest) => {
+    const { name } = splitNameAndArgs(rest)
     const doc = readDocument(ctx, namespace)
     if (doc.error) return err(doc.error)
-    return ok(JSON.stringify(doc.tools, null, 2))
+    if (name !== '') {
+      const tool = doc.tools.find((entry) => entry?.name === name)
+      if (!tool) return err(`没有找到工具 ${name}`)
+      return ok(JSON.stringify(tool, null, 2))
+    }
+    // The bundle is the shape the settings document has, so the output is both
+    // "the whole profile's tools" and something `add` and the page import can
+    // take back unchanged. A bare array would also work now — but the bundle
+    // says what it is once it leaves the chat window.
+    return ok(JSON.stringify({ tools: doc.tools }, null, 2))
   }
 
   // `ctx.commands` is a guarded service: property access throws unless `commands`
@@ -240,7 +273,7 @@ export function registerCommands(ctx, { manager, namespace }) {
   return ctx.effect(() => commands.register({
     name: 'custom-tools',
     description: '查看、预览、试运行、启用或禁用自定义工具',
-    input: { hint: 'list | status | show <name> | preview <name> [json] | test <name> [json] | enable|disable <name> | add <json> | export' },
+    input: { hint: 'list | status | show <name> | preview <name> [json] | test <name> [json] | enable|disable <name> | add <json> | export [name]' },
     handler: async ({ rawInput, agent, signal }) => {
       const { verb, rest } = splitInput(rawInput)
 
@@ -276,7 +309,7 @@ export function registerCommands(ctx, { manager, namespace }) {
       }
 
       if (verb === 'add') return addTool(rest)
-      if (verb === 'export') return exportTools()
+      if (verb === 'export') return exportTools(rest)
 
       return err(`未知子命令 ${verb}。\n\n${HELP}`)
     },

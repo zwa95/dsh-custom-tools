@@ -124,7 +124,10 @@ window.__ModuleLoader__.load({
     }
 
     const S = {
-      wrap: { display: 'grid', gap: 12, maxWidth: 900 },
+      // `minmax(0, 1fr)` is load-bearing: a plain `1fr` column is at least as
+      // wide as its widest item, so one long unbreakable row (an argv chip, a
+      // mono path) would push the settings panel into horizontal scroll.
+      wrap: { display: 'grid', gap: 12, maxWidth: 900, minWidth: 0, gridTemplateColumns: 'minmax(0, 1fr)' },
       header: { display: 'grid', gap: 4 },
       titleRow: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
       title: { margin: 0, fontSize: 15, fontWeight: 600, color: C.textPrimary },
@@ -133,6 +136,7 @@ window.__ModuleLoader__.load({
       card: {
         display: 'grid',
         gap: 0,
+        minWidth: 0,
         border: `1px solid ${C.borderL1}`,
         borderRadius: C.radius,
         background: C.bg1,
@@ -149,14 +153,14 @@ window.__ModuleLoader__.load({
       },
       twist: { width: 12, fontSize: 9, color: C.textTertiary, transition: 'transform .12s' },
       cardName: { font: C.mono, fontWeight: 600, color: C.textPrimary },
-      cardBody: { padding: '2px 12px 12px', borderTop: `1px solid ${C.borderL1}` },
-      panel: { padding: '10px 0', borderBottom: `1px solid ${C.borderL1}` },
+      cardBody: { padding: '2px 12px 12px', borderTop: `1px solid ${C.borderL1}`, minWidth: 0 },
+      panel: { padding: '10px 0', borderBottom: `1px solid ${C.borderL1}`, minWidth: 0 },
       panelLast: { padding: '10px 0 0', borderBottom: 'none' },
       panelHead: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 },
       panelTitle: { fontSize: 12, fontWeight: 600, color: C.textSecondary, letterSpacing: '.02em' },
       panelMeta: { fontSize: 11, color: C.textTertiary },
-      panelBody: { display: 'grid', gap: 8 },
-      grid2: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 },
+      panelBody: { display: 'grid', gap: 8, minWidth: 0 },
+      grid2: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8, minWidth: 0 },
       grid3: {
         display: 'grid',
         gridTemplateColumns: 'minmax(120px, 1fr) minmax(120px, 1fr) minmax(160px, 1.5fr)',
@@ -166,7 +170,7 @@ window.__ModuleLoader__.load({
       // Prefix/suffix rows hold two fields most of the time and three when the
       // array gets an explicit separator; auto-fit gives each one an equal share
       // of the row instead of pinning them to a three-column preset.
-      gridFit: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, alignItems: 'start' },
+      gridFit: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, alignItems: 'start', minWidth: 0 },
       field: { display: 'grid', gap: 4, fontSize: 12, minWidth: 0, alignContent: 'start' },
       labelRow: { display: 'flex', alignItems: 'center', gap: 4, minHeight: 14 },
       label: { fontSize: 11, color: C.textTertiary },
@@ -400,6 +404,8 @@ window.__ModuleLoader__.load({
       preview: {
         display: 'flex',
         flexWrap: 'wrap',
+        minWidth: 0,
+        overflow: 'hidden',
         gap: 5,
         alignItems: 'center',
         padding: '9px 10px',
@@ -417,6 +423,9 @@ window.__ModuleLoader__.load({
         display: 'inline-flex',
         alignItems: 'baseline',
         gap: 5,
+        maxWidth: '100%',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
         padding: '1px 7px',
         borderRadius: 4,
         border: '1px solid transparent',
@@ -424,7 +433,7 @@ window.__ModuleLoader__.load({
         whiteSpace: 'pre',
       },
       chipEmpty: { borderStyle: 'dashed', borderColor: C.borderL1, color: C.textTertiary },
-      pieceHead: { display: 'flex', gap: 6, alignItems: 'center' },
+      pieceHead: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 },
       pieceKind: { width: 96, flex: 'none' },
       pieceGrow: { flex: 1, minWidth: 0 },
       pieceBody: { display: 'grid', gap: 8, padding: '9px 0 2px' },
@@ -468,6 +477,71 @@ window.__ModuleLoader__.load({
       issues: { display: 'grid', gap: 2, fontSize: 11.5, color: C.error, lineHeight: 1.5 },
       ok: { fontSize: 11.5, color: C.success },
       note: { fontSize: 11.5, color: C.textTertiary, lineHeight: 1.6 },
+      row: { display: 'flex', gap: 6, alignItems: 'center', minWidth: 0 },
+      rowGrow: { flex: 1, minWidth: 0 },
+      // One input plus an optional trailing button on a single grid row. A grid
+      // (not a flex row) is what makes the field claim the whole line: the
+      // kit's `Input` sizes itself against its container, and a flex item with
+      // `width: auto` collapses it back to ~20 characters.
+      shellRow: {
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr)',
+        gap: 6,
+        alignItems: 'center',
+        minWidth: 0,
+      },
+      // The main-column panel is its own scroll box: the shell clips whatever
+      // the panel draws (no page-level wheel target), so the panel has to own
+      // `overflow-y` and take the column's full height. A centred max-width
+      // keeps a 1200px column from looking like the editor was left-aligned.
+      pageScroll: {
+        height: '100%',
+        minHeight: 0,
+        boxSizing: 'border-box',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        overscrollBehavior: 'contain',
+      },
+      pageBody: {
+        width: '100%',
+        maxWidth: 1040,
+        margin: '0 auto',
+        padding: '22px 26px 44px',
+        boxSizing: 'border-box',
+        minWidth: 0,
+      },
+      // Dialog chrome. The kit `Modal` owns the overlay when it is there; these
+      // styles are what the plain-DOM fallback paints, and they are also the
+      // body rhythm used inside the kit dialog so both read the same.
+      dialogBody: { display: 'grid', gap: 8, minWidth: 0 },
+      dialogText: { margin: 0, fontSize: 12, color: C.textSecondary, lineHeight: 1.6 },
+      dialogFoot: { display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' },
+      overlay: {
+        position: 'fixed',
+        inset: 0,
+        zIndex: 40,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+        background: 'rgba(0, 0, 0, 0.45)',
+      },
+      dialog: {
+        boxSizing: 'border-box',
+        width: 'min(680px, 92vw)',
+        maxHeight: '86vh',
+        overflow: 'auto',
+        display: 'grid',
+        gap: 10,
+        padding: '14px 16px',
+        borderRadius: C.radiusSmall,
+        border: `1px solid ${C.borderL2}`,
+        background: C.bg1,
+        boxShadow: '0 12px 40px rgba(0, 0, 0, 0.45)',
+      },
+      dialogHead: { display: 'flex', alignItems: 'center', gap: 8 },
+      dialogTitle: { fontSize: 14, color: C.textPrimary },
+      confirmBody: { display: 'grid', gap: 4, fontSize: 12, color: C.textSecondary, lineHeight: 1.6 },
     }
 
     // -------------------------------------------------------------- constants
@@ -524,6 +598,18 @@ window.__ModuleLoader__.load({
       value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value) || value.startsWith('\\\\')
     const PARAM_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u
     const ENV_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u
+
+    /**
+     * Keys that mark a plain object as a tool definition rather than a wrapper
+     * around them. Mirrors `TOOL_HINTS` in `src/config/document.js`: the page
+     * and the CLI have to agree on what a pasted document is.
+     */
+    const TOOL_HINTS = [
+      'name', 'title', 'description', 'whenToUse', 'mode', 'enabled',
+      'executable', 'interpreter', 'script', 'command', 'args', 'cwd',
+      'approval', 'concurrency', 'timeoutMs', 'env', 'encodingDefaults',
+      'credentials', 'parameters', 'output', 'examples',
+    ]
 
     const TEMPLATES = {
       executable: {
@@ -633,6 +719,142 @@ window.__ModuleLoader__.load({
       if (!isObject(value)) return { ...EMPTY_CONFIG, tools: [] }
       const tools = Array.isArray(value.tools) ? value.tools.filter(isObject) : []
       return { tools: clone(tools), deferLoading: value.deferLoading === true }
+    }
+
+    // --------------------------------------------------------------- sidebar
+
+    /**
+     * The id shared by the sidebar icon and the main panel it opens — the same
+     * pair the shipped Plugins page uses (`sidebar.panellist` id ↔ `main` key).
+     */
+    const PANEL_ID = 'custom-tools'
+
+    /**
+     * Whether the rail icon is shown is a *client* preference, not tool config:
+     * it changes nothing the Host executes, and keeping it out of the plugin
+     * config means toggling it can never invalidate a generation or bump the
+     * settings revision. `localStorage` survives reloads and app restarts.
+     */
+    const SIDEBAR_PREF_KEY = 'dsh-custom-tools:sidebar-entry'
+    const sidebarListeners = new Set()
+
+    function readSidebarPref() {
+      try {
+        return globalThis.localStorage?.getItem(SIDEBAR_PREF_KEY) === '1'
+      } catch {
+        return false
+      }
+    }
+
+    function writeSidebarPref(next) {
+      try {
+        globalThis.localStorage?.setItem(SIDEBAR_PREF_KEY, next ? '1' : '0')
+      } catch {
+        // Private mode or a locked-down webview: the switch still works for
+        // this session, it just will not remember the choice.
+      }
+      for (const listener of sidebarListeners) {
+        try {
+          listener(next)
+        } catch (error) {
+          if (typeof console !== 'undefined') console.warn('[dsh-custom-tools] sidebar listener failed', error)
+        }
+      }
+    }
+
+    // ------------------------------------------------------------- documents
+
+    /** A ```json fence pasted from a chat or a doc page is punctuation, not content. */
+    const FENCE = /^```[A-Za-z0-9_+-]*[ \t]*\r?\n([\s\S]*?)\r?\n?```$/u
+
+    function stripFence(text) {
+      const body = asString(text).replace(/^\uFEFF/u, '').trim()
+      const match = FENCE.exec(body)
+      return match === null ? body : match[1].trim()
+    }
+
+    /**
+     * Read a pasted JSON document as tools — the same three shapes the CLI's
+     * `add` takes: one definition, an array of them, or the `{ tools: [...] }`
+     * bundle `export` writes. Import is where exports actually travel, so both
+     * ends accepting all three is the whole point.
+     */
+    function parseToolDocument(text) {
+      const body = stripFence(text)
+      if (body === '') return { ok: false, error: '内容为空：粘贴一个工具定义 JSON。' }
+      const parsed = tryParseJson(body)
+      if (!parsed.ok) return { ok: false, error: '不是合法 JSON：检查引号、逗号与括号。' }
+      const value = parsed.value
+      let tools
+      if (Array.isArray(value)) tools = value
+      else if (isObject(value) && Array.isArray(value.tools)) tools = value.tools
+      else if (isObject(value) && TOOL_HINTS.some((key) => value[key] !== undefined)) tools = [value]
+      else {
+        return {
+          ok: false,
+          error: '无法识别：需要单个工具对象、工具对象数组，或 {"tools": [...]}。',
+        }
+      }
+      if (tools.length === 0) return { ok: false, error: '文档里没有工具定义。' }
+      const foreign = tools.findIndex((tool) => !isObject(tool))
+      if (foreign !== -1) return { ok: false, error: `第 ${foreign + 1} 项不是对象。` }
+      const names = new Set()
+      for (const tool of tools) {
+        const name = asString(tool.name)
+        if (name === '') continue
+        if (names.has(name)) return { ok: false, error: `工具名 ${name} 在文档里出现了两次。` }
+        names.add(name)
+      }
+      return { ok: true, tools: tools.map(clone) }
+    }
+
+    /** Which names an import would add versus overwrite, in document order. */
+    function planImport(existing, incoming) {
+      const known = new Map(existing.map((tool, index) => [asString(tool.name), index]))
+      return incoming.map((tool) => {
+        const name = asString(tool.name)
+        const index = known.get(name)
+        return { name, index: index === undefined ? -1 : index, replacing: index !== undefined }
+      })
+    }
+
+    /** Apply a plan: replacements land in place, new tools append. */
+    function applyImport(existing, incoming) {
+      const tools = existing.map(clone)
+      for (const tool of incoming) {
+        const name = asString(tool.name)
+        const index = tools.findIndex((entry) => asString(entry.name) === name)
+        if (index === -1) tools.push(clone(tool))
+        else tools[index] = clone(tool)
+      }
+      return tools
+    }
+
+    /** `navigator.clipboard` is absent outside a secure context; keep a fallback. */
+    async function copyText(text) {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard
+          && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text)
+          return true
+        }
+      } catch {
+        // fall through to the selection trick
+      }
+      try {
+        const area = document.createElement('textarea')
+        area.value = text
+        area.setAttribute('readonly', '')
+        area.style.position = 'fixed'
+        area.style.left = '-9999px'
+        document.body.appendChild(area)
+        area.select()
+        const copied = document.execCommand('copy')
+        document.body.removeChild(area)
+        return copied
+      } catch {
+        return false
+      }
     }
 
     // ------------------------------------------------------- pieces <-> spec
@@ -955,6 +1177,13 @@ window.__ModuleLoader__.load({
         if ((mode === 'bash' || mode === 'powershell') && asString(tool.command).trim() === '') {
           at('command', '脚本文本为空')
         }
+        // For a shell tool the field is optional, but an explicit empty string is
+        // not "use the default" downstream — it becomes the program name — so
+        // the card deletes the key instead and this rule catches hand-written JSON.
+        if ((mode === 'bash' || mode === 'powershell') && tool.executable !== undefined
+          && (typeof tool.executable !== 'string' || tool.executable.trim() === '')) {
+          at('executable', 'shell 可执行文件要么留空（默认 bash / pwsh），要么写名字或绝对路径')
+        }
 
         const parameters = isObject(tool.parameters) ? tool.parameters : {}
         for (const [paramName, parameter] of Object.entries(parameters)) {
@@ -1179,11 +1408,12 @@ window.__ModuleLoader__.load({
      * would fight the page's explicit Save), so this stays a native element —
      * but painted with the same tokens as the inputs around it.
      */
-    function TextArea({ value, onChange, disabled, placeholder, rows, mono }) {
+    function TextArea({ value, onChange, disabled, placeholder, rows, mono, readOnly }) {
       return h('textarea', {
         style: mono === true ? S.areaMono : S.area,
         value,
         disabled,
+        readOnly: readOnly === true,
         placeholder,
         rows: rows ?? 3,
         spellCheck: false,
@@ -1750,7 +1980,12 @@ window.__ModuleLoader__.load({
         const color = TONE[item.kind] ?? TONE.lit
         return h('span', {
           key: `${index}:${item.kind}:${item.text}`,
-          title: item.notes ?? '',
+          // The chip can be clipped by `overflow: hidden` (a long command text
+          // is one argv element), so the tooltip carries the whole element and
+          // the note behind it.
+          title: item.notes === undefined || item.notes === ''
+            ? item.text
+            : `${item.text} — ${item.notes}`,
           style: {
             ...S.chipBox,
             ...(conditional ? { borderStyle: 'dashed', borderColor: C.borderL2 } : null),
@@ -1800,6 +2035,149 @@ window.__ModuleLoader__.load({
           + '：每个框对应程序收到的一个参数；值由调用方提供，此处只呈现结构。'))
     }
 
+    // ---------------------------------------------------------------- dialogs
+
+    /**
+     * The kit's `Modal` when the host ships one, a plain overlay otherwise. Only
+     * the props the host's Modal actually takes are used — `open`, `title`,
+     * `description`, `closeLabel`, `footer`, `onClose`, `children` — so an
+     * older client that has the primitive gets the native dialog and a client
+     * without it still gets a working one.
+     */
+    function Dialog({ open, title, description, wide, onClose, footer, children }) {
+      const Modal = host('Modal')
+      const body = h('div', { style: S.dialogBody }, children)
+      if (Modal !== null) {
+        return h(Modal, {
+          open,
+          title,
+          description,
+          closeLabel: '关闭',
+          onClose,
+          footer: footer === undefined ? null : h('div', { style: S.dialogFoot }, footer),
+        }, wide ? h('div', { style: { width: 'min(720px, 88vw)', maxWidth: '100%' } }, body) : body)
+      }
+      if (!open) return null
+      return h('div', { style: S.overlay, onClick: onClose },
+        h('div', {
+          role: 'dialog',
+          'aria-modal': 'true',
+          'aria-label': title,
+          style: wide ? { ...S.dialog, width: 'min(720px, 92vw)' } : S.dialog,
+          onClick: (event) => event.stopPropagation(),
+        },
+        h('div', { style: S.dialogHead },
+          h('strong', { style: S.dialogTitle }, title),
+          h('span', { style: S.grow }),
+          h(Button, { kind: 'icon', title: '关闭', onClick: onClose }, '✕')),
+        description ? h('p', { style: S.dialogText }, description) : null,
+        body,
+        footer === undefined ? null : h('div', { style: S.dialogFoot }, footer)))
+    }
+
+    /**
+     * Paste-a-document dialog. It never writes: parsing and confirmation happen
+     * in the caller, so the same box serves "import into the page" and "replace
+     * this one card".
+     */
+    function ImportDialog({ open, title, description, text, error, busy, submitLabel, onText, onCancel, onSubmit }) {
+      return h(Dialog, {
+        open,
+        title,
+        description,
+        wide: true,
+        onClose: onCancel,
+        footer: [
+          h(Button, { key: 'cancel', disabled: busy, onClick: onCancel }, '取消'),
+          h(Button, { key: 'submit', kind: 'primary', disabled: busy, onClick: onSubmit }, submitLabel),
+        ],
+      },
+      h(TextArea, {
+        value: text,
+        rows: 16,
+        mono: true,
+        disabled: busy,
+        placeholder: '{\n  "name": "my_tool",\n  "description": "这个工具做什么",\n  "mode": "executable",\n  "executable": "git",\n  "args": [{ "literal": "status" }]\n}\n\n也可以粘贴数组，或 {"tools": [...]}。',
+        onChange: onText,
+      }),
+      error ? h('p', { style: S.error }, error) : null,
+      h('p', { style: S.hint }, '导入只改编辑区，点「保存」才会写入 profile。'))
+    }
+
+    /** Read-only JSON for one tool, with a copy button. */
+    function ExportDialog({ open, title, text, onClose }) {
+      const [copied, setCopied] = React.useState(false)
+      React.useEffect(() => { if (!open) setCopied(false) }, [open])
+      return h(Dialog, {
+        open,
+        title,
+        description: '这段 JSON 可以直接给同事，粘贴进「从 JSON 导入」或 /custom-tools add 都能用。',
+        wide: true,
+        onClose,
+        footer: [
+          h(Button, {
+            key: 'copy',
+            kind: 'primary',
+            onClick: async () => { setCopied(await copyText(text)) },
+          }, copied ? '已复制' : '复制'),
+          h(Button, { key: 'close', onClick: onClose }, '关闭'),
+        ],
+      },
+      h(TextArea, { value: text, rows: 16, mono: true, readOnly: true, onChange: () => {} }))
+    }
+
+    /** Second look before an import overwrites something that already exists. */
+    function ConfirmDialog({ open, title, description, detail, confirmLabel, onCancel, onConfirm }) {
+      return h(Dialog, {
+        open,
+        title,
+        description,
+        onClose: onCancel,
+        footer: [
+          h(Button, { key: 'cancel', onClick: onCancel }, '取消'),
+          h(Button, { key: 'confirm', kind: 'danger', onClick: onConfirm }, confirmLabel),
+        ],
+      },
+      detail.length === 0 ? null : h('div', { style: S.confirmBody },
+        ...detail.map((line) => h('div', { key: line }, line))))
+    }
+
+    /** "＋ 新增" — one button with the four modes behind it. */
+    function AddMenu({ disabled, onPick }) {
+      const Menu = host('Menu')
+      const [open, setOpen] = React.useState(false)
+      if (Menu === null) {
+        return h('span', { style: S.row },
+          ...MODES.map((mode) => h(Button, {
+            key: mode,
+            kind: 'small',
+            disabled,
+            onClick: () => onPick(mode),
+          }, MODE_LABEL[mode])))
+      }
+      return h(Menu, {
+        open: open && disabled !== true,
+        // The kit renders `anchor` verbatim and never opens itself.
+        anchor: h(Button, {
+          kind: 'small',
+          disabled,
+          'aria-haspopup': 'menu',
+          'aria-expanded': open,
+          onClick: () => setOpen((current) => !current),
+        }, '＋ 新增'),
+        items: MODES.map((mode) => ({ id: mode, label: MODE_LABEL[mode] })),
+        portal: true,
+        compact: true,
+        align: 'end',
+        autoFocus: true,
+        onClose: () => setOpen(false),
+        onSelect: (id) => {
+          setOpen(false)
+          onPick(id)
+        },
+      })
+    }
+
     // ------------------------------------------------------------- tool card
 
     /** Host chevrons when the kit is there; the ASCII pair is the fallback. */
@@ -1823,6 +2201,8 @@ window.__ModuleLoader__.load({
       canMoveUp,
       canMoveDown,
       onOpenChange,
+      onExport,
+      onImport,
       onDuplicate,
       onMoveUp,
       onMoveDown,
@@ -1838,6 +2218,9 @@ window.__ModuleLoader__.load({
       const Base = host('Menu')
       if (Base === null) return anchor
       const items = [
+        { id: 'export', label: '导出 JSON', disabled },
+        { id: 'import', label: '从 JSON 导入…', disabled },
+        { id: '', type: 'separator' },
         { id: 'duplicate', label: '复制', disabled },
         { id: 'up', label: '上移', disabled: disabled || canMoveUp !== true },
         { id: 'down', label: '下移', disabled: disabled || canMoveDown !== true },
@@ -1845,6 +2228,8 @@ window.__ModuleLoader__.load({
         { id: 'remove', label: '删除', danger: true, disabled },
       ]
       const actions = {
+        export: onExport,
+        import: onImport,
         duplicate: onDuplicate,
         up: onMoveUp,
         down: onMoveDown,
@@ -1871,6 +2256,7 @@ window.__ModuleLoader__.load({
       tool,
       index,
       total,
+      names,
       disabled,
       savedAt,
       issues,
@@ -1878,12 +2264,20 @@ window.__ModuleLoader__.load({
       onRemove,
       onMove,
       onDuplicate,
+      onReplace,
     }) {
       // Every card starts folded: the page is a list to scan first and open
       // second, and an expanded card pushes the rest of the list off-screen.
       const [open, setOpen] = React.useState(false)
       const [flagPreview, setFlagPreview] = React.useState({})
       const [menuOpen, setMenuOpen] = React.useState(false)
+      // Card-level JSON in/out. `pending` holds a parsed definition that is
+      // waiting for the overwrite confirmation.
+      const [exportOpen, setExportOpen] = React.useState(false)
+      const [importOpen, setImportOpen] = React.useState(false)
+      const [importText, setImportText] = React.useState('')
+      const [importError, setImportError] = React.useState('')
+      const [pending, setPending] = React.useState(null)
       const mine = issuesFor(issues, index)
       const errors = mine.filter((issue) => issue.severity !== 'warning')
       const warnings = mine.filter((issue) => issue.severity === 'warning')
@@ -1894,6 +2288,15 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { committed.current = asString(tool.name) }, [savedAt])
 
       const set = (fields) => onChange({ ...tool, ...fields })
+      // For a shell tool, `executable` is the shell binary and an *absent* field
+      // means "use the default". Writing '' instead would run the empty name,
+      // so a blank box deletes the key rather than storing an empty string.
+      const setShellExecutable = (next) => {
+        const copy = { ...tool }
+        if (next.trim() === '') delete copy.executable
+        else copy.executable = next
+        onChange(copy)
+      }
       const mode = asString(tool.mode, 'executable')
       const pieces = piecesOf(tool).map((piece) => (
         piece.kind === 'flag' ? { ...piece, active: flagPreview[piece.id] === true } : piece
@@ -1929,6 +2332,45 @@ window.__ModuleLoader__.load({
             allowLeadingDash: false, allowResponseFile: false,
           }])
         }
+      }
+
+      // ---------------------------------------------------- json in and out
+      const openImport = () => {
+        setImportText('')
+        setImportError('')
+        setPending(null)
+        setImportOpen(true)
+      }
+
+      const submitImport = () => {
+        const parsed = parseToolDocument(importText)
+        if (parsed.ok !== true) {
+          setImportError(parsed.error)
+          return
+        }
+        if (parsed.tools.length !== 1) {
+          setImportError(`一张卡片一次只接收 1 个工具定义；粘贴的文档里有 ${parsed.tools.length} 个，请到页面右上角整份导入。`)
+          return
+        }
+        const next = parsed.tools[0]
+        // A definition without a name inherits the card's, so "export, edit a
+        // field, paste back" does not force re-typing the name.
+        if (asString(next.name) === '') next.name = asString(tool.name)
+        const wanted = asString(next.name)
+        const elsewhere = names.some((name, position) => position !== index && asString(name) === wanted)
+        if (wanted !== '' && elsewhere) {
+          setImportError(`工具名 ${wanted} 已被另一个工具使用。`)
+          return
+        }
+        setImportError('')
+        setImportOpen(false)
+        setPending({ tool: next, name: wanted })
+      }
+
+      const confirmReplace = () => {
+        if (pending === null) return
+        onReplace(index, pending.tool)
+        setPending(null)
       }
 
       const modeRows = []
@@ -1970,6 +2412,33 @@ window.__ModuleLoader__.load({
         })))
       }
       if (mode === 'bash' || mode === 'powershell') {
+        const shell = mode === 'bash' ? 'bash' : 'pwsh'
+        const hasShell = asString(tool.executable) !== ''
+        modeRows.push(h(Field, {
+          key: 'shell-exe',
+          label: mode === 'bash' ? 'Bash 可执行文件' : 'PowerShell 可执行文件',
+          info: `留空则用 PATH 上的 ${shell}：`
+            + (mode === 'bash'
+              ? 'Windows 上会自动找 Git Bash / MSYS2（System32 里的 WSL 启动器会被跳过）。'
+              : '找不到 pwsh 时回退到 Windows PowerShell 5.1。')
+            + ' 也可以填绝对路径，指向特定安装。',
+        }, h('div', {
+          style: hasShell
+            ? { ...S.shellRow, gridTemplateColumns: 'minmax(0, 1fr) auto' }
+            : S.shellRow,
+        },
+        h(TextInput, {
+          mono: true,
+          disabled,
+          value: asString(tool.executable),
+          placeholder: mode === 'bash'
+            ? 'C:/Program Files/Git/bin/bash.exe'
+            : 'C:/Program Files/PowerShell/7/pwsh.exe',
+          onChange: (next) => setShellExecutable(next),
+        }),
+        hasShell
+          ? h(Button, { kind: 'small', disabled, onClick: () => setShellExecutable('') }, '用默认')
+          : null)))
         modeRows.push(h(Field, {
           key: 'command',
           label: '命令文本',
@@ -2020,6 +2489,8 @@ window.__ModuleLoader__.load({
             canMoveUp: index > 0,
             canMoveDown: index < total - 1,
             onOpenChange: setMenuOpen,
+            onExport: () => setExportOpen(true),
+            onImport: openImport,
             onDuplicate: () => onDuplicate(index),
             onMoveUp: () => onMove(index, -1),
             onMoveDown: () => onMove(index, 1),
@@ -2244,10 +2715,125 @@ window.__ModuleLoader__.load({
           }))),
 
           diagnostics)
-        : null)
+        : null,
+
+        // JSON in/out dialogs sit outside the folded body: exporting a folded
+        // card is the common case.
+        h(ExportDialog, {
+          key: 'export-dialog',
+          open: exportOpen,
+          title: `导出 ${asString(tool.name) || '未命名工具'}`,
+          text: JSON.stringify(applyPieces(tool, piecesOf(tool)), null, 2),
+          onClose: () => setExportOpen(false),
+        }),
+        h(ImportDialog, {
+          key: 'import-dialog',
+          open: importOpen,
+          title: `从 JSON 导入到 ${asString(tool.name) || '未命名工具'}`,
+          description: '粘贴一个工具对象，整份替换这张卡片的定义。',
+          text: importText,
+          error: importError,
+          busy: false,
+          submitLabel: '导入',
+          onText: (next) => { setImportText(next); setImportError('') },
+          onCancel: () => setImportOpen(false),
+          onSubmit: submitImport,
+        }),
+        pending === null ? null : h(ConfirmDialog, {
+          key: 'confirm-dialog',
+          open: true,
+          title: `用粘贴的定义覆盖「${pending.name}」？`,
+          description: '这张卡片的当前定义会被整份替换；改动仍只在编辑区，点「保存」才写入 profile。',
+          detail: [
+            `名称：${pending.name}`,
+            `模式：${MODE_LABEL[asString(pending.tool.mode, 'executable')] ?? asString(pending.tool.mode)}`,
+          ],
+          confirmLabel: '覆盖定义',
+          onCancel: () => { setPending(null); setImportOpen(true) },
+          onConfirm: confirmReplace,
+        }))
     }
 
     // ------------------------------------------------------------------ page
+
+    /**
+     * The rail glyph for the sidebar entry. The shipped Plugins page renders
+     * `IconPluginPinwheelOutlineRegular` the same way: take the size the owner
+     * passes and let `currentColor` follow the row's active state.
+     */
+    function SidebarGlyph({ size }) {
+      const Icon = host('IconSlidersTwoOutlineRegular')
+      if (Icon !== null) return h(Icon, { size: size ?? 16 })
+      return h('svg', {
+        width: size ?? 16,
+        height: size ?? 16,
+        viewBox: '0 0 16 16',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.4,
+        strokeLinecap: 'round',
+      },
+      h('path', { d: 'M2.5 4.5h11M2.5 11.5h11' }),
+      h('circle', { cx: 5.5, cy: 4.5, r: 1.6 }),
+      h('circle', { cx: 10.5, cy: 11.5, r: 1.6 }))
+    }
+
+    /**
+     * The same editor as the settings section, dropped into the main column.
+     * The settings sheet is ~600px wide and owns its own chrome; the main panel
+     * is the whole column, so the page wrapper only adds breathing room and the
+     * editor draws itself once (no second heading, no second save row).
+     *
+     * The column clips its children, so the panel owns the scroll box. Its
+     * height cannot come from `height: 100%` — the slot host does not promise a
+     * definite height for the child — so it is measured from the viewport and
+     * kept in step with resizes.
+     */
+    function makeSidebarPage(SectionPage) {
+      return function SidebarPage() {
+        const ref = React.useRef(null)
+
+        React.useEffect(() => {
+          const node = ref.current
+          if (!node || typeof globalThis.innerHeight !== 'number') return undefined
+          const fit = () => {
+            const rect = node.getBoundingClientRect()
+            // Before layout the box sits at the origin; measuring then would
+            // size the panel to the whole viewport and it would never overflow.
+            if (rect.top < 8) return
+            const available = globalThis.innerHeight - rect.top
+            if (available > 120) node.style.height = `${Math.round(available)}px`
+          }
+          // First frame is not always laid out yet, so measure on the next one.
+          const raf = typeof globalThis.requestAnimationFrame === 'function'
+            ? globalThis.requestAnimationFrame(() => fit())
+            : globalThis.setTimeout(fit, 16)
+          const observer = typeof globalThis.ResizeObserver === 'function'
+            ? new globalThis.ResizeObserver(fit)
+            : null
+          if (observer && node.parentElement) observer.observe(node.parentElement)
+          globalThis.addEventListener?.('resize', fit)
+          return () => {
+            if (typeof globalThis.cancelAnimationFrame === 'function') globalThis.cancelAnimationFrame(raf)
+            else globalThis.clearTimeout?.(raf)
+            observer?.disconnect()
+            globalThis.removeEventListener?.('resize', fit)
+          }
+        }, [])
+
+        return h('div', {
+          ref,
+          // Focusable so keyboard scrolling (PageDown/Space) works once the
+          // panel is clicked — the column itself is not a tab stop.
+          tabIndex: 0,
+          role: 'region',
+          'aria-label': '自定义工具',
+          style: S.pageScroll,
+        },
+          h('div', { style: S.pageBody },
+            h(SectionPage, { mode: 'page' })))
+      }
+    }
 
     function makeSectionPage(ctx) {
       // `remote.settings` is a guarded service name: reading `ctx.remote.settings`
@@ -2264,7 +2850,10 @@ window.__ModuleLoader__.load({
         }
       }
 
-      return function SectionPage() {
+      return function SectionPage(props) {
+        // 'page' means the main-column panel: wider, and it must not draw the
+        // sheet's second toolbar — the footer row is the only save surface there.
+        const pageMode = props?.mode === 'page'
         const [phase, setPhase] = React.useState('loading')
         const [problem, setProblem] = React.useState('')
         const [banner, setBanner] = React.useState(null)
@@ -2280,6 +2869,16 @@ window.__ModuleLoader__.load({
         // whole card on every keystroke, which steals focus from the name input.
         const rowIds = React.useRef([])
         const nextRowId = React.useRef(1)
+        // Page-level JSON import: the dialog text, its parse error, and the plan
+        // waiting for an "overwrite these" confirmation.
+        const [importOpen, setImportOpen] = React.useState(false)
+        const [importText, setImportText] = React.useState('')
+        const [importError, setImportError] = React.useState('')
+        const [pendingImport, setPendingImport] = React.useState(null)
+        // The rail entry is a client preference, not tool config: toggling it
+        // must not touch the settings revision, so it lives beside the draft
+        // instead of inside it.
+        const [sidebarOn, setSidebarOn] = React.useState(readSidebarPref)
 
         async function load() {
           setPhase('loading')
@@ -2370,6 +2969,51 @@ window.__ModuleLoader__.load({
           edit({ ...config, tools: [...config.tools, clone(TEMPLATES[kind])] })
         }
 
+        // Whole-page JSON import. `rowIds` is index-parallel to `tools`, so a
+        // replacement keeps its row id and only appended tools get new ones —
+        // otherwise every imported card would remount.
+        const commitImport = (incoming) => {
+          const next = applyImport(config.tools, incoming)
+          const ids = [...rowIds.current]
+          while (ids.length < next.length) ids.push(nextRowId.current++)
+          rowIds.current = ids.slice(0, next.length)
+          const added = next.length - config.tools.length
+          edit({ ...config, tools: next })
+          setImportOpen(false)
+          setBanner({
+            tone: 'ok',
+            title: '已导入到编辑区。',
+            text: added > 0
+              ? `新增 ${added} 个工具；点「保存」写入 profile。`
+              : '覆盖了已有定义；点「保存」写入 profile。',
+          })
+        }
+
+        const openImport = () => {
+          setImportText('')
+          setImportError('')
+          setPendingImport(null)
+          setImportOpen(true)
+        }
+
+        const importTools = () => {
+          const parsed = parseToolDocument(importText)
+          if (parsed.ok !== true) {
+            setImportError(parsed.error)
+            return
+          }
+          const plan = planImport(config.tools, parsed.tools)
+          const replacing = plan.filter((entry) => entry.replacing === true)
+          if (replacing.length === 0) {
+            commitImport(parsed.tools)
+            return
+          }
+          // Close the paste box so the confirmation is the only thing on screen;
+          // cancelling reopens it with the text still in place.
+          setImportOpen(false)
+          setPendingImport({ tools: parsed.tools, names: replacing.map((entry) => entry.name) })
+        }
+
         const save = async () => {
           if (busy || revision === undefined) return
           if (errorCount > 0) {
@@ -2428,9 +3072,9 @@ window.__ModuleLoader__.load({
         }
 
         const body = [
-          h('div', { key: 'header', style: S.header },
+          h('div', { key: 'header', style: pageMode ? { ...S.header, paddingTop: 0 } : S.header },
             h('div', { key: 't', style: S.titleRow },
-              h('h3', { key: 'title', style: S.title }, '自定义工具'),
+              h('h3', { key: 'title', style: pageMode ? { ...S.title, fontSize: 19 } : S.title }, '自定义工具'),
               h(Chip, { key: 'rev' }, revision === undefined ? 'revision …' : `revision ${revision}`),
               dirty ? h(Chip, { key: 'dirty', tone: 'dirty' }, '未保存') : null,
               errorCount > 0 ? h(Chip, { key: 'bad', tone: 'bad' }, `${errorCount} 处错误`) : null,
@@ -2454,39 +3098,17 @@ window.__ModuleLoader__.load({
         }
 
         if (phase === 'ready') {
+          // One order for both surfaces: actions first, then the two global
+          // switches, then the cards. The settings sheet used to repeat the
+          // save row at the bottom, which read as two different toolbars.
           body.push(h('div', { key: 'toolbar', style: S.toolbar },
             h(Button, { key: 'save', kind: 'primary', disabled: busy || !dirty, onClick: save },
               busy ? '保存中…' : '保存'),
             h(Button, { key: 'revert', disabled: busy || !dirty, onClick: revert }, '放弃修改'),
             h(Button, { key: 'reload', disabled: busy, onClick: () => load() }, '重新读取'),
             h('span', { key: 'grow', style: S.grow }),
-            h('span', { key: 'add-label', style: S.hint }, '新增：'),
-            ...MODES.map((mode) => h(Button, {
-              key: `add-${mode}`,
-              kind: 'small',
-              disabled: busy,
-              onClick: () => addTool(mode),
-            }, MODE_LABEL[mode]))))
-
-          if (config.tools.length === 0) {
-            body.push(h('div', { key: 'empty', style: S.empty },
-              h('strong', null, '还没有工具定义'),
-              h('span', null, '从上方任选一种类型新建，或直接编辑 profile 的 cordis.patch.yml。')))
-          }
-
-          body.push(...config.tools.map((tool, index) => h(ToolCard, {
-            key: rowIds.current[index] ?? `row-${index}`,
-            tool,
-            index,
-            total: config.tools.length,
-            disabled: busy,
-            savedAt,
-            issues,
-            onChange: (next) => setTool(index, next),
-            onRemove: removeTool,
-            onMove: moveTool,
-            onDuplicate: duplicateTool,
-          })))
+            h(AddMenu, { key: 'add', disabled: busy, onPick: addTool }),
+            h(Button, { key: 'import', kind: 'small', disabled: busy, onClick: openImport }, '从 JSON 导入')))
 
           body.push(h('div', { key: 'defer', style: S.toolbar },
             h(Checkbox, {
@@ -2494,19 +3116,75 @@ window.__ModuleLoader__.load({
               disabled: busy,
               label: '延迟加载工具定义',
               onChange: (next) => edit({ ...config, deferLoading: next }),
-            })))
-
-          body.push(h('div', { key: 'foot', style: S.toolbar },
-            h(Button, { key: 'save2', kind: 'primary', disabled: busy || !dirty, onClick: save },
-              busy ? '保存中…' : '保存'),
-            h(Button, { key: 'revert2', disabled: busy || !dirty, onClick: revert }, '放弃修改'),
+            }),
+            h(Checkbox, {
+              checked: sidebarOn,
+              disabled: busy,
+              label: '在侧边栏显示入口',
+              onChange: (next) => {
+                setSidebarOn(next)
+                writeSidebarPref(next)
+              },
+            }),
+            h('span', { key: 'grow2', style: S.grow }),
             h('span', { key: 'count', style: S.status },
               `共 ${config.tools.length} 个，启用 ${config.tools.filter((tool) => tool.enabled !== false).length} 个`)))
+
+          if (config.tools.length === 0) {
+            body.push(h('div', { key: 'empty', style: S.empty },
+              h('strong', null, '还没有工具定义'),
+              h('span', null, '用「＋ 新增」建立第一个工具，或用「从 JSON 导入」粘贴一份别人分享的定义；也可以直接编辑 profile 的 cordis.patch.yml。')))
+          }
+
+          body.push(...config.tools.map((tool, index) => h(ToolCard, {
+            key: rowIds.current[index] ?? `row-${index}`,
+            tool,
+            index,
+            total: config.tools.length,
+            names: config.tools.map((entry) => asString(entry.name)),
+            disabled: busy,
+            savedAt,
+            issues,
+            onChange: (next) => setTool(index, next),
+            onRemove: removeTool,
+            onMove: moveTool,
+            onDuplicate: duplicateTool,
+            onReplace: setTool,
+          })))
 
           body.push(h('div', { key: 'hint', style: S.hint },
             '本页只编辑定义，不执行命令。试跑请在会话内使用：'
             + '/custom-tools preview <名字> {"参数":"值"} 查看 argv，'
             + '/custom-tools test <名字> {"参数":"值"} 实际执行一次。'))
+
+          body.push(h(ImportDialog, {
+            key: 'page-import',
+            open: importOpen,
+            title: '从 JSON 导入工具',
+            description: '粘贴单个工具对象、对象数组，或 {"tools":[...]}；导入只改编辑区，点「保存」才写入 profile。',
+            text: importText,
+            error: importError,
+            busy: false,
+            submitLabel: '导入',
+            onText: (next) => { setImportText(next); setImportError('') },
+            onCancel: () => setImportOpen(false),
+            onSubmit: importTools,
+          }))
+
+          body.push(pendingImport === null ? null : h(ConfirmDialog, {
+            key: 'page-confirm',
+            open: true,
+            title: '覆盖已有工具？',
+            description: '下列工具名已经存在，导入会用粘贴的定义整份替换它们；改动仍只在编辑区，点「保存」才写入 profile。',
+            detail: pendingImport.names.map((name) => `将被覆盖：${name}`),
+            confirmLabel: '覆盖这些工具',
+            onCancel: () => { setPendingImport(null); setImportOpen(true) },
+            onConfirm: () => {
+              const pending = pendingImport
+              setPendingImport(null)
+              commitImport(pending.tools)
+            },
+          }))
         }
 
         return h('div', { style: S.wrap }, body)
@@ -2527,13 +3205,60 @@ window.__ModuleLoader__.load({
             SectionPage,
           )
         })
+        // The main panel is always there — an unselected panel costs nothing and
+        // keeps `selectPanel('custom-tools')` valid the moment the icon appears.
+        ctx.slots.inject('main', () => ctx.slots.register(
+          { name: 'main', key: PANEL_ID },
+          makeSidebarPage(SectionPage),
+        ))
+        // The icon is the only optional half, and the shipped account section
+        // shows the pattern: register lazily, keep the disposer, call it when
+        // the preference flips.
+        ctx.slots.inject('sidebar.panellist', () => {
+          let unregister
+          const sync = (enabled) => {
+            if (enabled && unregister === undefined) {
+              unregister = ctx.slots.register(
+                { name: 'sidebar.panellist', id: PANEL_ID, order: 5, label: '自定义工具' },
+                SidebarGlyph,
+              )
+            } else if (!enabled && unregister !== undefined) {
+              unregister()
+              unregister = undefined
+            }
+          }
+          sync(readSidebarPref())
+          const listener = (next) => sync(next)
+          sidebarListeners.add(listener)
+          return () => {
+            sidebarListeners.delete(listener)
+            if (unregister !== undefined) {
+              unregister()
+              unregister = undefined
+            }
+          }
+        })
       },
       /**
        * Exposed for `test/client.test.js` only. `piecesOf`/`applyPieces` are the
        * one conversion that could silently eat a field, so they are reachable
        * from a test harness instead of being trusted by inspection.
        */
-      __internal: { piecesOf, applyPieces, previewOf, collectIssues, slotText, findNamespace, readConfig },
+      __internal: {
+        piecesOf,
+        applyPieces,
+        previewOf,
+        collectIssues,
+        slotText,
+        findNamespace,
+        readSidebarPref,
+        writeSidebarPref,
+        readConfig,
+        stripFence,
+        parseToolDocument,
+        planImport,
+        applyImport,
+      },
     }
   },
 })
