@@ -10,7 +10,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| 仓库 | `C:\Users\mark\Desktop\dsh-custom-tools`（Git，`main`） |
+| 仓库 | `C:\Users\<user>\Desktop\dsh-custom-tools`（Git，`main`） |
 | 最新提交 | `456e003 fix(icon): declare the top-level icon field`（tag `v0.1.2`）；工作树干净，与 `origin/main` 同步 |
 | 版本 | `package.json` **0.1.3**；tag `v0.1.1` / `v0.1.2` / `v0.1.3`；npm `latest = 0.1.2`（0.1.3 待发；发布由**人**执行，见 §8「发版靠人手」） |
 | 规模 | `index.js` 133 行 + `client.js` 3264 行 + `src/**` 3652 行；测试 **116 项全绿**（12 个测试文件） |
@@ -27,7 +27,7 @@
 ## 1. 怎么跑、怎么验证
 
 ```bash
-cd /c/Users/mark/Desktop/dsh-custom-tools
+cd /c/Users/<user>/Desktop/dsh-custom-tools
 
 node --check client.js     # client.js 不能有语法错误（它是手写单文件，没有构建）
 node --test                # 116 项，全绿；约 0.5s
@@ -55,7 +55,7 @@ node research/tools/roundtrip-live.mjs <path-to-js-yaml.mjs>
 | 改了什么 | 怎么生效 |
 | --- | --- |
 | 用户工具定义（`~/.dsh/profiles/desktop/cordis.patch.yml` 里的 `config.tools`） | **几秒内自动生效**（`dsh-hmr` 监听 patch 文件 → `loader/volatile-update` → `Manager.apply`），不用重启 |
-| 本插件**模块代码**（`index.js` / `src/**`） | **必须重启 DSH 应用**，而且当前是**拷贝安装**：改仓库里的文件对运行中的实例毫无影响，要先把包装进 profile（`plugin_manager` 重装，或临时把依赖改成 `link:C:/Users/mark/Desktop/dsh-custom-tools`）。`link:` 形态下同样要重启——Node `ModuleLoader.loadCache` 按 realpath 缓存，同一个 URL 不会重新求值；`plugin_manager` 的 disable/enable 也不行 |
+| 本插件**模块代码**（`index.js` / `src/**`） | **必须重启 DSH 应用**，而且当前是**拷贝安装**：改仓库里的文件对运行中的实例毫无影响，要先把包装进 profile（`plugin_manager` 重装，或临时把依赖改成 `link:C:/Users/<user>/Desktop/dsh-custom-tools`）。`link:` 形态下同样要重启——Node `ModuleLoader.loadCache` 按 realpath 缓存，同一个 URL 不会重新求值；`plugin_manager` 的 disable/enable 也不行 |
 | `client.js` | 改**安装目录里那一份**（`~/.dsh/profiles/desktop/node_modules/dsh-custom-tools/client.js`）才**不用重启**：客户端插件带 HMR 接收器，存盘后设置页当场重挂（实测，见 §7.2）。改仓库副本不会触发任何重载。真不生效时再刷新页面 |
 | 只是刷新浏览器页面 | 只会重载 Client 半边（`client.js`），Host 不变 |
 
@@ -321,7 +321,7 @@ powershell   [exe, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', comma
 
 ### 7.2 真机自检怎么做的（没有 DevTools 也能看）
 
-DSH 的 Web UI 走 `127.0.0.1:54438` 且要 token（401），但**桌面窗口可以截图和点击**：PowerShell + `Add-Type`
+DSH 的 Web UI 走 `127.0.0.1:<port>` 且要 token（401），但**桌面窗口可以截图和点击**：PowerShell + `Add-Type`
 声明 `user32` 的 `GetClientRect` / `ClientToScreen` / `CopyFromScreen` 截客户区，`SetCursorPos` +
 `mouse_event` 点击，`SendKeys` 打字，`mouse_event(0x0800)` 滚轮。截图 2560×1392。
 
@@ -473,7 +473,7 @@ Cordis 把 `apply` 的返回值当 effect 校验；返回 `{...}` 直接 `Invali
 
 ### `link:` 包的裸 import 按 realpath 解析
 
-装了 `link:` 之后，Node 从 `C:\Users\mark\Desktop\dsh-custom-tools` 往上找 `node_modules`，**走不到 profile 也走不到 asar**。所以 `package.json` 必须有 `devDependencies` 的精确版本（`4.0.5` / `0.2.1-rc.3` / `3.18.5`），并且项目里要 `pnpm install` 过。缺了它，Host 半边整体 `ERR_MODULE_NOT_FOUND`，而 Client 半边只 `require('react')` 照样能渲染 —— 又是一个"只有设置页活着"的症状。
+装了 `link:` 之后，Node 从 `C:\Users\<user>\Desktop\dsh-custom-tools` 往上找 `node_modules`，**走不到 profile 也走不到 asar**。所以 `package.json` 必须有 `devDependencies` 的精确版本（`4.0.5` / `0.2.1-rc.3` / `3.18.5`），并且项目里要 `pnpm install` 过。缺了它，Host 半边整体 `ERR_MODULE_NOT_FOUND`，而 Client 半边只 `require('react')` 照样能渲染 —— 又是一个"只有设置页活着"的症状。
 
 ### 其他小坑
 
@@ -542,7 +542,7 @@ Cordis 把 `apply` 的返回值当 effect 校验；返回 `{...}` 直接 `Invali
 ## 11. 交接清单（5 分钟）
 
 ```bash
-cd /c/Users/mark/Desktop/dsh-custom-tools
+cd /c/Users/<user>/Desktop/dsh-custom-tools
 git status --short          # 应该只剩预期改动
 git log --oneline -1        # 456e003（tag v0.1.2）
 node --check client.js
@@ -563,12 +563,12 @@ node --test                 # 116 pass
 
 | 工具 | mode | 关键点 |
 | --- | --- | --- |
-| `python_pretty_json` `:145` | script | `interpreter: python`、脚本 `C:\Users\mark\.dsh\custom-tools\scripts\pretty-json.py`；参数 `path`(必填) + flag `sort_keys`→`--sort` |
+| `python_pretty_json` `:145` | script | `interpreter: python`、脚本 `C:\Users\<user>\.dsh\custom-tools\scripts\pretty-json.py`；参数 `path`(必填) + flag `sort_keys`→`--sort` |
 | `bash_grep` `:180` | bash | `command: 'grep -rnI --color=never -- "$@"…'`（没命中 exit 1 被翻成 0）；`$@` 位置传参 |
 | `pwsh_recent_files` `:212` | powershell | 参数只走 `{ stdin: 'json' }`；`Get-ChildItem` + 时间过滤；未写 `executable` → 自动回退 `powershell.exe` |
-| `rg_search` `:267` | executable | `C:\Users\mark\.dsh\custom-tools\bin\rg.exe`（从 DSH asar 复制出来的 ripgrep 15.0.0，避免随 app 升级失踪）；`concurrency: parallel` |
+| `rg_search` `:267` | executable | `C:\Users\<user>\.dsh\custom-tools\bin\rg.exe`（从 DSH asar 复制出来的 ripgrep 15.0.0，避免随 app 升级失踪）；`concurrency: parallel` |
 | `ciallo_echo` `:323` | bash | 只有一格文本参数的卖萌回显：`command: printf 'Ciallo～(∠・ω< )⌒★ %s\n' "$*"`，`args: [{ arg: text }]` |
 
-辅助资产：`C:\Users\mark\.dsh\custom-tools\scripts\`（python 脚本）、`C:\Users\mark\.dsh\custom-tools\bin\`（rg.exe）。
+辅助资产：`C:\Users\<user>\.dsh\custom-tools\scripts\`（python 脚本）、`C:\Users\<user>\.dsh\custom-tools\bin\`（rg.exe）。
 
 > 这五份定义**只存在于 profile patch 里**，不在本仓库中。仓库里的 `examples/` 是同类示例，可以 `/custom-tools add` 直接导入。

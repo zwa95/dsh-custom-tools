@@ -291,7 +291,7 @@ const state = {
   mode: 'script',
   executable: '',
   interpreter: 'python',
-  script: 'C:/Users/mark/.dsh/custom-tools/scripts/pretty-json.py',
+  script: 'C:/Users/<user>/.dsh/custom-tools/scripts/pretty-json.py',
   command: '',
   pieces: [],
   open: {},
@@ -323,7 +323,7 @@ const PRESETS = [
       Object.assign(state, {
         mode: 'script',
         interpreter: 'python',
-        script: 'C:/Users/mark/.dsh/custom-tools/scripts/pretty-json.py',
+        script: 'C:/Users/<user>/.dsh/custom-tools/scripts/pretty-json.py',
         command: '',
         pieces: [
           variable({ name: 'path', type: 'string', required: true, description: 'JSON 文件路径，绝对路径或相对工作目录'}),
@@ -338,7 +338,7 @@ const PRESETS = [
     apply() {
       Object.assign(state, {
         mode: 'executable',
-        executable: 'C:/Users/mark/.dsh/custom-tools/bin/rg.exe',
+        executable: 'C:/Users/<user>/.dsh/custom-tools/bin/rg.exe',
         interpreter: '',
         script: '',
         command: '',

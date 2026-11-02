@@ -1,5 +1,5 @@
 // Throwaway probe: confirm the Schemastery surface this sample relies on.
-const mod = require('C:/Users/mark/.dsh/profiles/desktop/node_modules/@deepseek-ai/schemastery/lib/index.cjs')
+const mod = require('C:/Users/<user>/.dsh/profiles/desktop/node_modules/@deepseek-ai/schemastery/lib/index.cjs')
 const S = mod.default || mod
 
 console.log(

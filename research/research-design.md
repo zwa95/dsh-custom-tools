@@ -851,7 +851,7 @@ uv 工程脚本（实测 uv 0.11.2）：
 
 ```yaml
 - name: gauss_query
-  executable: "C:\\Users\\mark\\.local\\bin\\uv.exe"   # 或裸名 uv
+  executable: "C:\\Users\\<user>\\.local\\bin\\uv.exe"   # 或裸名 uv
   cwd: "C:\\proj\\gauss-tool"
   args:
     - { literal: "run" }
@@ -902,7 +902,7 @@ jar：
 | `bash`（mode: bash） | 无 | Git Bash 输出本身 UTF-8 |
 | 其他 exe | 无 | 走 §6.7 三条动作 |
 
-**识别方式**：`resolveExecutable()` 出绝对路径后取 basename（去掉 `.exe`），大小写不敏感。所以 `uv`、`C:\Python312\python.exe`、`C:\Users\mark\.local\bin\uv.exe` 都能命中。
+**识别方式**：`resolveExecutable()` 出绝对路径后取 basename（去掉 `.exe`），大小写不敏感。所以 `uv`、`C:\Python312\python.exe`、`C:\Users\<user>\.local\bin\uv.exe` 都能命中。
 
 **优先级（高 → 低）**：用户 `env` 显式给了同名键 → 用户赢，不覆盖；`encodingDefaults: false` → 全部不注入；否则注入默认。
 
@@ -1063,7 +1063,7 @@ enabled --禁用/breaking更新--> quiescing --(inflight=0 或 超时)--> hidden
 - 页面：`settings.section` 注册 `cts-section`，左侧栏出现「自定义工具（样例）」
 - 读：`describe()` 返回 32 个 view，`cts-section` 的 `value = {"label":"custom section",...}`，secret 字段被剥离
 - 写：点保存 → `revision` 从 0 涨到 3、再到 4，两次修改都生效
-- 落盘：`C:\Users\mark\.dsh\profiles\desktop\cordis.patch.yml` 出现
+- 落盘：`C:\Users\<user>\.dsh\profiles\desktop\cordis.patch.yml` 出现
 
   ```yaml
   - id: cts-section

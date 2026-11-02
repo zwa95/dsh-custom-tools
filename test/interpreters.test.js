@@ -48,7 +48,7 @@ function fakeServices(overrides = {}) {
 test('the WSL launcher and the store stub are not bash', () => {
   assert.equal(isStubBash('C:\\Windows\\System32\\bash.exe'), true)
   assert.equal(isStubBash('c:/windows/system32/BASH.EXE'), true)
-  assert.equal(isStubBash('C:\\Users\\mark\\AppData\\Local\\Microsoft\\WindowsApps\\bash.exe'), true)
+  assert.equal(isStubBash('C:\\Users\\<user>\\AppData\\Local\\Microsoft\\WindowsApps\\bash.exe'), true)
   assert.equal(isStubBash('C:\\Program Files\\Git\\bin\\bash.exe'), false)
   assert.equal(isStubBash('C:\\msys64\\usr\\bin\\bash.exe'), false)
 })

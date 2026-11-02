@@ -1,7 +1,7 @@
 # Windows 受限令牌下能跑什么（实测矩阵）
 
 这是 v1 的一条平台级事实，直接决定了 `mode: bash` 在 Windows 上的行为。数据来自在临时 lab
-（`C:\Users\mark\AppData\Local\Temp\acl-lab`）里直接用 `@deepseek-ai/dsh-sandbox-windows-acl/lib/runner.js`
+（`C:\Users\<user>\AppData\Local\Temp\acl-lab`）里直接用 `@deepseek-ai/dsh-sandbox-windows-acl/lib/runner.js`
 跑命令：
 
 ```
